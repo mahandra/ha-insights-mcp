@@ -1,0 +1,1 @@
+# HA Insights MCP

@@ -1,0 +1,22 @@
+# Secrets
+.env
+token
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Dev Home Assistant runtime state (keep only our configuration.yaml)
+dev/ha-config/*
+!dev/ha-config/configuration.yaml
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
