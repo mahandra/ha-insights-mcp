@@ -1,0 +1,10 @@
+# Dev Home Assistant configuration for HA Insights MCP.
+
+# Standard set of integrations (frontend, history, recorder, api, websocket_api, ...).
+default_config:
+
+# Fake devices and entities: lights, switches, sensors, climate, covers, media players...
+demo:
+
+logger:
+  default: warning

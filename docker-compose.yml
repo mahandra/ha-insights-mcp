@@ -1,0 +1,13 @@
+# Dev Home Assistant with the `demo` integration (fake lights, sensors, climate, etc.).
+# For local development only — not a production setup.
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.10.4
+    container_name: ha-insights-dev
+    ports:
+      - "8123:8123"
+    volumes:
+      - ./dev/ha-config:/config
+    environment:
+      - TZ=Europe/Moscow
+    restart: unless-stopped
