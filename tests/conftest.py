@@ -152,5 +152,10 @@ REGISTRY_RESULTS = {
 
 
 @pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.fixture
 def fake_ws() -> FakeWebSocket:
     return FakeWebSocket(REGISTRY_RESULTS)

@@ -20,6 +20,8 @@ from tests.conftest import (
     fake_ws_factory,
 )
 
+pytestmark = pytest.mark.anyio
+
 
 @pytest.fixture
 async def client(fake_ws: FakeWebSocket):

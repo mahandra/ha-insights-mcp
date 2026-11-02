@@ -1,6 +1,10 @@
+import pytest
+
 from ha_insights_mcp.ha.models import EntityState, Registries
 from ha_insights_mcp.snapshot import HomeSnapshot, SnapshotProvider
 from tests.conftest import REGISTRY_RESULTS, STATES
+
+pytestmark = pytest.mark.anyio
 
 
 def make_states() -> list[EntityState]:
