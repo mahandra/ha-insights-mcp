@@ -197,3 +197,34 @@ async def test_ha_down_reaches_model(client: Client, ha_api) -> None:
     ha_api.get("/api/states").mock(side_effect=httpx.ConnectError("refused"))
     result = await client.call_tool("search_entities", {"query": "x"})
     assert "Cannot connect to Home Assistant" in error_text(result)
+
+
+# ------------------------------------------------------------------ resources
+
+
+async def test_home_summary_resource_is_listed(client: Client) -> None:
+    resources = (await client.list_resources()).resources
+    assert [(str(r.uri), r.mime_type) for r in resources] == [
+        ("ha://home/summary", "text/markdown")
+    ]
+
+
+async def test_home_summary_resource_content(client: Client) -> None:
+    result = await client.read_resource("ha://home/summary")
+    text = result.contents[0].text
+    assert text == (
+        "# Dev Home\n"
+        "Home Assistant 2026.10.4. 5 entities, 3 areas, 0 unavailable.\n"
+        "\n"
+        "## Areas (entities)\n"
+        "- Bedroom (`bedroom`): 2\n"
+        "- Garage (`garage`): 0\n"
+        "- Kitchen (`kitchen`): 1\n"
+        "- No area: 2\n"
+        "\n"
+        "## Domains (entities)\n"
+        "- climate: 1\n"
+        "- light: 2\n"
+        "- sensor: 1\n"
+        "- sun: 1\n"
+    )

@@ -10,6 +10,7 @@ from ha_insights_mcp import __version__
 from ha_insights_mcp.config import Settings
 from ha_insights_mcp.context import AppContext
 from ha_insights_mcp.ha import HAClient, HAError
+from ha_insights_mcp.resources import register_resources
 from ha_insights_mcp.snapshot import SnapshotProvider
 from ha_insights_mcp.tools import register_tools
 
@@ -25,16 +26,19 @@ This server cannot change device states.
 
 
 def create_server(client_factory: Callable[[], HAClient], cache_ttl: float) -> MCPServer:
+    client = client_factory()
+    app_context = AppContext(client=client, snapshots=SnapshotProvider(client, ttl=cache_ttl))
+
     @asynccontextmanager
     async def lifespan(_: MCPServer) -> AsyncIterator[AppContext]:
-        async with client_factory() as client:
+        async with client:
             try:
                 config = await client.get_config()
                 logger.info("Connected to Home Assistant %s at %s", config.version, client.base_url)
             except HAError as exc:
                 # Do not fail startup: tools will report the problem to the model.
                 logger.warning("Home Assistant check failed: %s", exc)
-            yield AppContext(client=client, snapshots=SnapshotProvider(client, ttl=cache_ttl))
+            yield app_context
 
     mcp = MCPServer(
         "ha-insights",
@@ -44,6 +48,7 @@ def create_server(client_factory: Callable[[], HAClient], cache_ttl: float) -> M
         lifespan=lifespan,
     )
     register_tools(mcp)
+    register_resources(mcp, app_context)
     return mcp
 
 
