@@ -122,6 +122,14 @@ Opens the Inspector in the browser, connected over stdio. Click **Connect**, the
 **Tools → List Tools → `list_areas` → Run**; **Resources → `ha://home/summary`**.
 Check the output schema and the structured result of each tool.
 
+Headless (CLI mode), handy for scripts and CI:
+
+```bash
+npx -y @modelcontextprotocol/inspector --cli uv run ha-insights-mcp --method tools/list
+npx -y @modelcontextprotocol/inspector --cli uv run ha-insights-mcp \
+  --method tools/call --tool-name search_entities --tool-arg query=garage
+```
+
 ### Claude Code
 
 ```bash
@@ -164,7 +172,7 @@ mocked HA. Conventions for contributors and AI agents: [CLAUDE.md](CLAUDE.md).
 
 ## Roadmap
 
-1. **Skeleton + read-only tools over stdio**, dev HA in Docker ← *current*
+1. **Skeleton + read-only tools over stdio**, dev HA in Docker ← *done*
 2. History analytics, device health (unavailable / flapping / battery), automation audit
 3. Guarded actions: domain allowlist, value bounds, dry-run, confirmation for risky
    actions, SQLite audit log
