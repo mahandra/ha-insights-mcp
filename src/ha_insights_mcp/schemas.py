@@ -138,3 +138,65 @@ class HealthReport(BaseModel):
         description="Problems Home Assistant itself reports (Settings -> Repairs)"
     )
     checks_skipped: list[str] = Field(description="Checks not run and why")
+
+
+# -------------------------------------------------------------- automations
+
+RunResult = Literal["ok", "error", "dropped", "running", "none"]
+
+
+class AutomationSummary(BaseModel):
+    entity_id: str
+    name: str
+    state: str = Field(description="on | off | unavailable (config failed to load)")
+    mode: str | None
+    last_triggered: datetime | None
+    last_run: RunResult = Field(description="Result of the newest stored run")
+
+
+class AutomationList(BaseModel):
+    automations: list[AutomationSummary]
+
+
+class AutomationRun(BaseModel):
+    started_at: datetime
+    result: RunResult
+    trigger: str | None
+    error: str | None
+
+
+class AutomationDetails(BaseModel):
+    entity_id: str
+    name: str
+    state: str
+    mode: str | None
+    description: str | None
+    last_triggered: datetime | None
+    config_available: bool = Field(description="False for YAML automations without an id")
+    triggers: list[Any]
+    conditions: list[Any]
+    actions: list[Any]
+    referenced_entities: list[str]
+    recent_runs: list[AutomationRun] = Field(
+        description="Newest first; HA stores only the last few runs per automation"
+    )
+
+
+class AuditFinding(BaseModel):
+    entity_id: str
+    name: str
+    code: str = Field(
+        description=(
+            "config_invalid | missing_entity | missing_device | last_run_failed | "
+            "unavailable_entity | runs_dropped | disabled | never_triggered | "
+            "not_triggered_recently | no_id | templated_refs"
+        )
+    )
+    severity: Literal["error", "warning", "info"]
+    message: str
+
+
+class AuditReport(BaseModel):
+    automations_checked: int
+    counts: dict[str, int] = Field(description="Findings per severity, before min_severity")
+    findings: list[AuditFinding] = Field(description="Most severe first")

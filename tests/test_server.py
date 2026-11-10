@@ -14,6 +14,9 @@ EXPECTED_TOOLS = {
     "summarize_history",
     "rank_activity",
     "check_device_health",
+    "list_automations",
+    "get_automation",
+    "audit_automations",
 }
 
 
