@@ -9,6 +9,7 @@ from datetime import datetime
 from mcp.server.mcpserver import MCPServer
 
 from ha_insights_mcp import __version__
+from ha_insights_mcp.analytics.health import HealthThresholds
 from ha_insights_mcp.config import Settings
 from ha_insights_mcp.context import AppContext
 from ha_insights_mcp.ha import HAClient, HAError
@@ -31,11 +32,14 @@ def create_server(
     client_factory: Callable[[], HAClient],
     cache_ttl: float,
     now: Callable[[], datetime] | None = None,
+    thresholds: HealthThresholds | None = None,
 ) -> MCPServer:
     client = client_factory()
     app_context = AppContext(client=client, snapshots=SnapshotProvider(client, ttl=cache_ttl))
     if now is not None:
         app_context = replace(app_context, now=now)
+    if thresholds is not None:
+        app_context = replace(app_context, thresholds=thresholds)
 
     @asynccontextmanager
     async def lifespan(_: MCPServer) -> AsyncIterator[AppContext]:
@@ -66,4 +70,9 @@ def server_from_settings(settings: Settings) -> MCPServer:
             settings.ha_url, settings.ha_token, timeout=settings.ha_timeout_seconds
         ),
         cache_ttl=settings.ha_cache_ttl_seconds,
+        thresholds=HealthThresholds(
+            battery_low_percent=settings.battery_low_percent,
+            stale_hours=settings.stale_hours,
+            flapping_changes_per_hour=settings.flapping_changes_per_hour,
+        ),
     )

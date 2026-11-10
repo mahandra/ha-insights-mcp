@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     ha_token: SecretStr = Field(description="Home Assistant long-lived access token")
     ha_timeout_seconds: float = Field(default=10.0, gt=0)
     ha_cache_ttl_seconds: float = Field(default=10.0, ge=0)
+    # Device health thresholds
+    battery_low_percent: float = Field(default=20, ge=0, le=100)
+    stale_hours: float = Field(default=24, gt=0)
+    flapping_changes_per_hour: int = Field(default=20, ge=2)
     log_level: str = "INFO"
 
     @field_validator("ha_url")

@@ -13,6 +13,7 @@ EXPECTED_TOOLS = {
     "list_areas",
     "summarize_history",
     "rank_activity",
+    "check_device_health",
 }
 
 

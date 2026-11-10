@@ -106,3 +106,35 @@ class ActivityResult(BaseModel):
         description="True if numeric sensors were skipped (pass domain='sensor' to include)"
     )
     entities: list[ActivityEntry] = Field(description="Most state changes first; idle omitted")
+
+
+# ------------------------------------------------------------------- health
+
+
+class HealthIssueOut(BaseModel):
+    code: str = Field(description="unavailable | low_battery | stale | flapping | unknown_state")
+    severity: Literal["error", "warning", "info"]
+    entity_id: str
+    name: str
+    device: str | None
+    area: str | None
+    detail: str
+    since: datetime | None = Field(description="When the problem started, if known")
+
+
+class RepairIssueOut(BaseModel):
+    domain: str
+    issue: str = Field(description="HA's issue key, e.g. 'service_not_found'")
+    severity: str
+
+
+class HealthReport(BaseModel):
+    counts: dict[str, int] = Field(
+        description="Issues per severity across all checks, before min_severity/limit"
+    )
+    issues: list[HealthIssueOut] = Field(description="Most severe first")
+    truncated: bool
+    ha_repairs: list[RepairIssueOut] = Field(
+        description="Problems Home Assistant itself reports (Settings -> Repairs)"
+    )
+    checks_skipped: list[str] = Field(description="Checks not run and why")

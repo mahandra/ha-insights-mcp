@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 
+from ha_insights_mcp.analytics.health import HealthThresholds
 from ha_insights_mcp.ha import HAClient, HAError, HANotFoundError
 from ha_insights_mcp.snapshot import SnapshotProvider
 
@@ -16,6 +17,7 @@ from ha_insights_mcp.snapshot import SnapshotProvider
 class AppContext:
     client: HAClient
     snapshots: SnapshotProvider
+    thresholds: HealthThresholds = field(default_factory=HealthThresholds)
     # Injectable for deterministic tests of time-window analytics.
     now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
 

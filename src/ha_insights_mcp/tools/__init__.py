@@ -2,9 +2,9 @@
 
 from mcp.server.mcpserver import MCPServer
 
-from ha_insights_mcp.tools import discovery, history
+from ha_insights_mcp.tools import discovery, health, history
 
 
 def register_tools(mcp: MCPServer) -> None:
-    for module in (discovery, history):
+    for module in (discovery, history, health):
         module.register(mcp)

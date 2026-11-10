@@ -25,6 +25,8 @@ class EntityState(_HAModel):
     attributes: dict[str, Any] = {}
     last_changed: datetime
     last_updated: datetime
+    # Updated on every report, even if nothing changed (HA 2024.3+).
+    last_reported: datetime | None = None
 
     @property
     def domain(self) -> str:
