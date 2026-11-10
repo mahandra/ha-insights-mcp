@@ -5,7 +5,7 @@ so they double as documentation for the model.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -46,3 +46,63 @@ class AreaSummary(BaseModel):
 class ListAreasResult(BaseModel):
     areas: list[AreaSummary]
     unassigned_entity_count: int = Field(description="Entities that belong to no area")
+
+
+# ------------------------------------------------------------------ history
+
+
+class HistoryBucket(BaseModel):
+    start: datetime
+    min: float | None
+    mean: float | None
+    max: float | None
+
+
+class NumericHistory(BaseModel):
+    min: float | None
+    mean: float | None
+    max: float | None
+    missing_pct: float = Field(description="% of time the entity was unavailable/unknown")
+    buckets: list[HistoryBucket] = Field(description="Evenly sized time buckets, oldest first")
+    source: str = Field(description="'statistics' (HA long-term stats) or 'history' (raw)")
+
+
+class StateChange(BaseModel):
+    at: datetime
+    state: str
+
+
+class DiscreteHistory(BaseModel):
+    changes: int = Field(description="Number of state changes in the window")
+    time_in_state_pct: dict[str, float] = Field(
+        description="Share of the window spent in each state, in percent"
+    )
+    recent_changes: list[StateChange] = Field(description="Up to 10 latest changes, oldest first")
+
+
+class HistorySummary(BaseModel):
+    entity_id: str
+    name: str
+    unit: str | None
+    current_state: str
+    window_hours: int
+    kind: Literal["numeric", "discrete"]
+    numeric: NumericHistory | None = Field(description="Set when kind == 'numeric'")
+    discrete: DiscreteHistory | None = Field(description="Set when kind == 'discrete'")
+
+
+class ActivityEntry(BaseModel):
+    entity_id: str
+    name: str
+    area: str | None
+    changes: int
+    last_changed: datetime
+
+
+class ActivityResult(BaseModel):
+    window_hours: int
+    considered: int = Field(description="Entities whose history was analysed")
+    numeric_sensors_excluded: bool = Field(
+        description="True if numeric sensors were skipped (pass domain='sensor' to include)"
+    )
+    entities: list[ActivityEntry] = Field(description="Most state changes first; idle omitted")

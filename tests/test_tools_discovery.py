@@ -1,68 +1,18 @@
-"""End-to-end tool tests: in-memory MCP Client -> server -> real HAClient -> mocked HA."""
+"""End-to-end discovery tool tests: in-memory MCP Client -> server -> real HAClient -> mocked HA."""
 
 import httpx
 import pytest
-import respx
 from mcp import Client
 
-from ha_insights_mcp.ha import HAClient
-from ha_insights_mcp.server import create_server
-from tests.conftest import (
-    CONFIG,
-    HA_URL,
-    REGISTRY_RESULTS,
-    STATES,
-    TOKEN,
-    FakeWebSocket,
-    fake_ws_factory,
-)
+from tests.conftest import STATES, TOKEN, call, error_text, mcp_client
 
 pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture
-def ha_api():
-    with respx.mock(base_url=HA_URL, assert_all_called=False) as mock:
-        mock.get("/api/config").respond(json=CONFIG)
-        mock.get("/api/states").respond(json=STATES)
-        for st in STATES:
-            mock.get(f"/api/states/{st['entity_id']}").respond(json=st)
-        mock.get(url__regex=r"/api/states/.+").respond(404, json={"message": "Entity not found."})
-        yield mock
-
-
-@pytest.fixture
 async def client(ha_api):
-    server = create_server(
-        client_factory=lambda: HAClient(
-            HA_URL,
-            TOKEN,
-            timeout=2,
-            ws_connect_factory=fake_ws_factory(FakeWebSocket(REGISTRY_RESULTS)),
-        ),
-        cache_ttl=10,
-    )
-    async with Client(server) as c:
+    async with mcp_client() as c:
         yield c
-
-
-async def call(client: Client, tool: str, **args):
-    result = await client.call_tool(tool, args)
-    assert not result.is_error, result.content
-    return result.structured_content
-
-
-def error_text(result) -> str:
-    assert result.is_error
-    return result.content[0].text
-
-
-async def test_tools_are_listed_as_read_only(client: Client) -> None:
-    tools = {t.name: t for t in (await client.list_tools()).tools}
-    assert set(tools) == {"search_entities", "get_entity_state", "list_areas"}
-    for tool in tools.values():
-        assert tool.annotations.read_only_hint is True
-        assert tool.output_schema is not None
 
 
 # ------------------------------------------------------------ search_entities

@@ -3,6 +3,8 @@
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
+from datetime import datetime
 
 from mcp.server.mcpserver import MCPServer
 
@@ -25,9 +27,15 @@ This server cannot change device states.
 """
 
 
-def create_server(client_factory: Callable[[], HAClient], cache_ttl: float) -> MCPServer:
+def create_server(
+    client_factory: Callable[[], HAClient],
+    cache_ttl: float,
+    now: Callable[[], datetime] | None = None,
+) -> MCPServer:
     client = client_factory()
     app_context = AppContext(client=client, snapshots=SnapshotProvider(client, ttl=cache_ttl))
+    if now is not None:
+        app_context = replace(app_context, now=now)
 
     @asynccontextmanager
     async def lifespan(_: MCPServer) -> AsyncIterator[AppContext]:

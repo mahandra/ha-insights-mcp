@@ -1,4 +1,4 @@
-"""Read-only MCP tools.
+"""Discovery tools: find entities, read one entity, list areas.
 
 Tool docstrings and parameter descriptions are prompts for the LLM: they tell it when
 to use a tool, what comes back and what to do next. Edit them with the same care as code.
@@ -9,7 +9,6 @@ from typing import Annotated, Any
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from ha_insights_mcp.context import AppContext, app, ha_errors_as_tool_errors
@@ -22,9 +21,7 @@ from ha_insights_mcp.schemas import (
     SearchEntitiesResult,
 )
 from ha_insights_mcp.snapshot import EntityView, HomeSnapshot
-
-# Hints for clients: nothing here changes HA, and the set of entities is closed (not the web).
-READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+from ha_insights_mcp.tools.common import READ_ONLY
 
 # Attributes worth showing per domain. Everything else (icons, supported_features bitmasks,
 # entity_picture, internal ids, GPS coordinates, ...) is dropped to save tokens and privacy.
@@ -69,7 +66,7 @@ DOMAIN_ATTRIBUTES: dict[str, tuple[str, ...]] = {
 MAX_LIST_ITEMS = 20
 
 
-def register_tools(mcp: MCPServer) -> None:
+def register(mcp: MCPServer) -> None:
     @mcp.tool(title="Search entities", annotations=READ_ONLY)
     async def search_entities(
         ctx: Context[AppContext],
@@ -101,7 +98,7 @@ def register_tools(mcp: MCPServer) -> None:
         """
         with ha_errors_as_tool_errors():
             snapshot = await app(ctx).snapshots.get()
-        candidates = _filter(snapshot, domain=domain, area=area)
+        candidates = filter_entities(snapshot, domain=domain, area=area)
         ranked = _rank(candidates, query)
         return SearchEntitiesResult(
             total=len(ranked),
@@ -162,7 +159,9 @@ def register_tools(mcp: MCPServer) -> None:
         )
 
 
-def _filter(snapshot: HomeSnapshot, *, domain: str | None, area: str | None) -> list[EntityView]:
+def filter_entities(
+    snapshot: HomeSnapshot, *, domain: str | None, area: str | None
+) -> list[EntityView]:
     views = list(snapshot.entities.values())
     if domain:
         domain = domain.strip().lower()

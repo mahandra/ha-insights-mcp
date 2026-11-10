@@ -1,8 +1,9 @@
 """Objects shared by all MCP handlers for the lifetime of the server."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
@@ -15,6 +16,8 @@ from ha_insights_mcp.snapshot import SnapshotProvider
 class AppContext:
     client: HAClient
     snapshots: SnapshotProvider
+    # Injectable for deterministic tests of time-window analytics.
+    now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
 
 
 def app(ctx: Context[AppContext]) -> AppContext:

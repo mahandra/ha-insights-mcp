@@ -18,8 +18,13 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
 ## Layout
 - `src/ha_insights_mcp/ha/` — Home Assistant client. **Must not import `mcp`.**
 - `src/ha_insights_mcp/snapshot.py` — joins states + registries, short TTL cache.
-- `src/ha_insights_mcp/{server,tools,resources,schemas}.py` — MCP layer only.
-- `dev/` — dev Home Assistant config and dev-only scripts.
+- `src/ha_insights_mcp/analytics/` — pure functions (no I/O, no MCP): history, health, audit.
+  Test them with plain fixtures, no mocks.
+- `src/ha_insights_mcp/tools/` — one module per theme, each exposing `register(mcp)`;
+  shared annotations in `tools/common.py`.
+- `src/ha_insights_mcp/{server,context,resources,schemas}.py` — MCP layer.
+- `dev/` — dev Home Assistant config and dev-only scripts (`seed_areas.py`, `simulate.py`
+  write to the dev HA; never import them from `src/`).
 
 ## Rules
 - Security: HA token only from env/.env, stored as `SecretStr`; never log it, never put it in
@@ -27,6 +32,9 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
 - Phase 1 is read-only: no HA write calls in `src/`. All tools are annotated `readOnlyHint=True`.
 - stdio transport: stdout belongs to JSON-RPC. Log to stderr only; never `print()`.
 - Tool outputs are pydantic models with compact fields. Never return raw HA JSON.
+- Aggregate on the server: return conclusions (counts, percentages, buckets), not raw
+  history. Prefer HA statistics over raw points for numeric sensors.
+- Time-dependent code takes "now" from `AppContext.now` so tests can pin the clock.
 - Tool docstrings and `Field(description=...)` are prompts for the LLM: say when to use the
   tool, what it returns, and what to call next.
 - HA errors become typed exceptions in `ha/errors.py`; the MCP layer converts them into

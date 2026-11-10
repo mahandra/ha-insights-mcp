@@ -1,12 +1,19 @@
 """Shared fixtures: realistic (trimmed) Home Assistant payloads and fakes."""
 
 import json
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import pytest
+import respx
+from mcp import Client
 from pydantic import SecretStr
+
+from ha_insights_mcp.ha import HAClient
+from ha_insights_mcp.server import create_server
 
 HA_URL = "http://ha.test:8123"
 TOKEN = SecretStr("test-token-123")
@@ -123,10 +130,16 @@ class FakeWebSocket:
         errors: dict[str, dict[str, str]] | None = None,
     ) -> None:
         self._results = results
+        self.url: str | None = None
         self._errors = errors or {}
         self._auth_ok = auth_ok
-        self._outbox: list[dict[str, Any]] = [{"type": "auth_required", "ha_version": "2026.10.4"}]
         self.sent: list[dict[str, Any]] = []
+        self.connections = 0
+        self.new_connection()
+
+    def new_connection(self) -> None:
+        self.connections += 1
+        self._outbox: list[dict[str, Any]] = [{"type": "auth_required", "ha_version": "2026.10.4"}]
 
     async def send(self, message: str) -> None:
         data = json.loads(message)
@@ -156,6 +169,8 @@ class FakeWebSocket:
 def fake_ws_factory(ws: FakeWebSocket):
     @asynccontextmanager
     async def connect(url: str):
+        if ws.url is not None:
+            ws.new_connection()
         ws.url = url
         yield ws
 
@@ -177,3 +192,43 @@ def anyio_backend() -> str:
 @pytest.fixture
 def fake_ws() -> FakeWebSocket:
     return FakeWebSocket(REGISTRY_RESULTS)
+
+
+@pytest.fixture
+def ha_api():
+    """Mocked HA REST API with STATES; tests can override routes."""
+    with respx.mock(base_url=HA_URL, assert_all_called=False) as mock:
+        mock.get("/api/config").respond(json=CONFIG)
+        mock.get("/api/states").respond(json=STATES)
+        for st in STATES:
+            mock.get(f"/api/states/{st['entity_id']}").respond(json=st)
+        mock.get(url__regex=r"/api/states/.+").respond(404, json={"message": "Entity not found."})
+        yield mock
+
+
+@asynccontextmanager
+async def mcp_client(
+    ws_results: dict[str, Any] | None = None, now: Callable[[], datetime] | None = None
+) -> AsyncIterator[Client]:
+    """In-memory MCP client -> server -> real HAClient -> fake WebSocket (+ respx REST)."""
+    ws = FakeWebSocket({**REGISTRY_RESULTS, **(ws_results or {})})
+    server = create_server(
+        client_factory=lambda: HAClient(
+            HA_URL, TOKEN, timeout=2, ws_connect_factory=fake_ws_factory(ws)
+        ),
+        cache_ttl=10,
+        now=now,
+    )
+    async with Client(server) as client:
+        yield client
+
+
+async def call(client: Client, tool: str, **args: Any) -> Any:
+    result = await client.call_tool(tool, args)
+    assert not result.is_error, result.content
+    return result.structured_content
+
+
+def error_text(result: Any) -> str:
+    assert result.is_error
+    return result.content[0].text
