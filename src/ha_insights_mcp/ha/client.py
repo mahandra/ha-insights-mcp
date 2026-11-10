@@ -10,8 +10,10 @@ Phase 1: read-only — there are intentionally no methods that change HA state.
 import asyncio
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol, Self
 
 import httpx
@@ -30,17 +32,29 @@ from ha_insights_mcp.ha.errors import (
 from ha_insights_mcp.ha.models import (
     ENTITY_ID_RE,
     Area,
+    AutomationTrace,
     Device,
     EntityRegistryEntry,
     EntityState,
     HAConfig,
     Registries,
+    RepairIssue,
+    StatBucket,
+    StatePoint,
 )
 
 logger = logging.getLogger(__name__)
 
 # Registry lists on big installations can be several MB.
 _WS_MAX_MESSAGE_BYTES = 32 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class WSCommandError:
+    """A failed WebSocket command, returned instead of raised when errors are allowed."""
+
+    code: str
+    message: str
 
 
 class WebSocketLike(Protocol):
@@ -145,9 +159,9 @@ class HAClient:
     async def get_registries(self) -> Registries:
         """Fetch area, device and entity registries in a single WebSocket session."""
         areas, devices, entities = await self._ws_commands(
-            "config/area_registry/list",
-            "config/device_registry/list",
-            "config/entity_registry/list",
+            {"type": "config/area_registry/list"},
+            {"type": "config/device_registry/list"},
+            {"type": "config/entity_registry/list"},
         )
         return Registries(
             areas=[_parse(Area, a, "area") for a in areas],
@@ -155,20 +169,120 @@ class HAClient:
             entities=[_parse(EntityRegistryEntry, e, "entity registry entry") for e in entities],
         )
 
+    async def get_history(
+        self, entity_ids: Iterable[str], start: datetime, end: datetime | None = None
+    ) -> dict[str, list[StatePoint]]:
+        """State changes per entity. The first point is the state at `start`."""
+        ids = list(entity_ids)
+        if not ids:
+            return {}
+        command: dict[str, Any] = {
+            "type": "history/history_during_period",
+            "start_time": start.isoformat(),
+            "entity_ids": ids,
+            "minimal_response": True,
+            "no_attributes": True,
+            "significant_changes_only": False,
+            "include_start_time_state": True,
+        }
+        if end is not None:
+            command["end_time"] = end.isoformat()
+        (result,) = await self._ws_commands(command)
+        if not isinstance(result, dict):
+            raise HAResponseError("Unexpected history payload: expected an object")
+        return {
+            entity_id: [_state_point(p) for p in points] for entity_id, points in result.items()
+        }
+
+    async def get_statistics(
+        self, statistic_ids: Iterable[str], start: datetime, end: datetime, period: str = "hour"
+    ) -> dict[str, list[StatBucket]]:
+        """Long-term statistics (mean/min/max) per statistic id, e.g. a sensor entity_id."""
+        ids = list(statistic_ids)
+        if not ids:
+            return {}
+        (result,) = await self._ws_commands(
+            {
+                "type": "recorder/statistics_during_period",
+                "start_time": start.isoformat(),
+                "end_time": end.isoformat(),
+                "statistic_ids": ids,
+                "period": period,
+                "types": ["mean", "min", "max"],
+            }
+        )
+        if not isinstance(result, dict):
+            raise HAResponseError("Unexpected statistics payload: expected an object")
+        return {
+            stat_id: [
+                _parse(
+                    StatBucket,
+                    {**b, "start": _from_ms(b.get("start")), "end": _from_ms(b.get("end"))},
+                    "statistics bucket",
+                )
+                for b in buckets
+            ]
+            for stat_id, buckets in result.items()
+        }
+
+    async def get_automation_configs(
+        self, entity_ids: Iterable[str]
+    ) -> dict[str, dict[str, Any] | None]:
+        """Automation configs by entity_id (one WS session). None if HA has no config,
+        e.g. a YAML automation without `id`."""
+        ids = list(entity_ids)
+        if not ids:
+            return {}
+        results = await self._ws_commands(
+            *({"type": "automation/config", "entity_id": e} for e in ids), allow_errors=True
+        )
+        configs: dict[str, dict[str, Any] | None] = {}
+        for entity_id, result in zip(ids, results, strict=True):
+            config = None if isinstance(result, WSCommandError) else result.get("config")
+            configs[entity_id] = config if isinstance(config, dict) else None
+        return configs
+
+    async def list_automation_traces(self) -> list[AutomationTrace]:
+        """Stored runs of all automations, newest last per HA's ordering."""
+        (result,) = await self._ws_commands({"type": "trace/list", "domain": "automation"})
+        return [
+            _parse(
+                AutomationTrace,
+                {
+                    **t,
+                    "started_at": (t.get("timestamp") or {}).get("start"),
+                    "finished_at": (t.get("timestamp") or {}).get("finish"),
+                },
+                "automation trace",
+            )
+            for t in result or []
+        ]
+
+    async def list_repair_issues(self) -> list[RepairIssue]:
+        """Issues Home Assistant itself has raised (Settings -> Repairs)."""
+        (result,) = await self._ws_commands({"type": "repairs/list_issues"})
+        return [_parse(RepairIssue, i, "repair issue") for i in (result or {}).get("issues", [])]
+
     @property
     def _ws_url(self) -> str:
         scheme, rest = self._base_url.split("://", 1)
         return f"{'wss' if scheme == 'https' else 'ws'}://{rest}/api/websocket"
 
-    async def _ws_commands(self, *command_types: str) -> list[Any]:
-        """Authenticate, run commands sequentially, return their `result` payloads."""
+    async def _ws_commands(
+        self, *commands: dict[str, Any], allow_errors: bool = False
+    ) -> list[Any]:
+        """Authenticate, run commands sequentially, return their `result` payloads.
+
+        With `allow_errors`, a failed command yields a WSCommandError in its slot instead of
+        raising (auth failures still raise).
+        """
         try:
             async with asyncio.timeout(self._timeout):
                 async with self._ws_connect(self._ws_url) as ws:
                     await self._ws_authenticate(ws)
                     return [
-                        await self._ws_call(ws, msg_id, command)
-                        for msg_id, command in enumerate(command_types, start=1)
+                        await self._ws_call(ws, msg_id, command, allow_errors)
+                        for msg_id, command in enumerate(commands, start=1)
                     ]
         except TimeoutError:
             raise HATimeoutError(
@@ -201,8 +315,11 @@ class HAClient:
         if reply.get("type") != "auth_ok":
             raise HAResponseError(f"Unexpected WebSocket auth reply: {reply.get('type')!r}")
 
-    async def _ws_call(self, ws: WebSocketLike, msg_id: int, command: str) -> Any:
-        await ws.send(json.dumps({"id": msg_id, "type": command}))
+    async def _ws_call(
+        self, ws: WebSocketLike, msg_id: int, command: dict[str, Any], allow_errors: bool
+    ) -> Any:
+        command_type = command["type"]
+        await ws.send(json.dumps({"id": msg_id, **command}))
         while True:
             message = await _ws_recv(ws)
             # Skip anything that is not the answer to this command (e.g. pings, events).
@@ -213,9 +330,13 @@ class HAClient:
             code, text = error.get("code", "unknown"), error.get("message", "")
             if code == "unauthorized":
                 raise HAAuthError(
-                    f"Token is not allowed to run {command!r}: registries require an admin user"
+                    f"Token is not allowed to run {command_type!r}: it requires an admin user"
                 )
-            raise HAResponseError(f"WebSocket command {command!r} failed: {code} {text}".strip())
+            if allow_errors:
+                return WSCommandError(code=code, message=text)
+            raise HAResponseError(
+                f"WebSocket command {command_type!r} failed: {code} {text}".strip()
+            )
         return message.get("result")
 
 
@@ -228,6 +349,19 @@ async def _ws_recv(ws: WebSocketLike) -> dict[str, Any]:
     if not isinstance(message, dict):
         raise HAResponseError("Unexpected WebSocket message: expected a JSON object")
     return message
+
+
+def _from_ms(value: Any) -> datetime | None:
+    return datetime.fromtimestamp(value / 1000, UTC) if isinstance(value, int | float) else None
+
+
+def _state_point(point: Any) -> StatePoint:
+    # Compressed history format: s=state, lu=last_updated, lc=last_changed (epoch seconds;
+    # lc is omitted when equal to lu).
+    if not isinstance(point, dict) or "s" not in point or "lu" not in point:
+        raise HAResponseError("Unexpected history point from Home Assistant")
+    changed = point.get("lc", point["lu"])
+    return StatePoint(state=str(point["s"]), changed_at=datetime.fromtimestamp(changed, UTC))
 
 
 def _parse[M: BaseModel](model: type[M], payload: Any, what: str) -> M:

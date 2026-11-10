@@ -2,6 +2,7 @@
 
 import json
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -99,8 +100,20 @@ ENTITY_REGISTRY = [
 CONFIG = {"version": "2026.10.4", "location_name": "Dev Home", "unit_system": {}}
 
 
+@dataclass
+class FakeError:
+    """Return this from a FakeWebSocket handler to make one command fail."""
+
+    code: str
+    message: str = ""
+
+
 class FakeWebSocket:
-    """Scripted HA WebSocket: answers auth and registry commands from a mapping."""
+    """Scripted HA WebSocket: answers auth and commands from a mapping.
+
+    A mapping value is either the result itself or a callable taking the sent command
+    (dict) and returning the result or a FakeError.
+    """
 
     def __init__(
         self,
@@ -125,10 +138,15 @@ class FakeWebSocket:
         # An unrelated message before the answer, to exercise id matching.
         self._outbox.append({"id": 999, "type": "event", "event": {}})
         reply: dict[str, Any] = {"id": data["id"], "type": "result"}
-        if command in self._errors:
+        result = self._results.get(command)
+        if callable(result):
+            result = result(data)
+        if isinstance(result, FakeError):
+            reply |= {"success": False, "error": {"code": result.code, "message": result.message}}
+        elif command in self._errors:
             reply |= {"success": False, "error": self._errors[command]}
         else:
-            reply |= {"success": True, "result": self._results[command]}
+            reply |= {"success": True, "result": result}
         self._outbox.append(reply)
 
     async def recv(self) -> str:

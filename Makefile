@@ -1,4 +1,4 @@
-.PHONY: help install dev-ha-up dev-ha-down dev-ha-logs dev-seed dev-simulate run test lint fmt inspect
+.PHONY: help install dev-ha-up dev-ha-down dev-ha-logs dev-seed dev-simulate run test lint fmt check inspect
 
 help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -36,6 +36,8 @@ lint: ## Lint with ruff
 fmt: ## Auto-format with ruff
 	uv run ruff check --fix src tests dev
 	uv run ruff format src tests dev
+
+check: lint test ## Lint + tests (run before every commit)
 
 inspect: ## Open MCP Inspector against the stdio server
 	npx -y @modelcontextprotocol/inspector uv run ha-insights-mcp

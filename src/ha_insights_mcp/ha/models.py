@@ -77,3 +77,42 @@ class Registries(_HAModel):
     areas: list[Area]
     devices: list[Device]
     entities: list[EntityRegistryEntry]
+
+
+class StatePoint(_HAModel):
+    """One state change from the recorder history."""
+
+    state: str
+    changed_at: datetime
+
+
+class StatBucket(_HAModel):
+    """One long-term statistics bucket (recorder), e.g. an hour."""
+
+    start: datetime
+    end: datetime
+    mean: float | None = None
+    min: float | None = None
+    max: float | None = None
+
+
+class AutomationTrace(_HAModel):
+    """Summary of one stored automation run (HA keeps only the last few per automation)."""
+
+    item_id: str  # automation config id, not entity_id
+    run_id: str
+    state: str  # running | stopped
+    script_execution: str | None = None  # finished | error | failed_conditions | ...
+    error: str | None = None
+    trigger: str | None = None
+    last_step: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+class RepairIssue(_HAModel):
+    domain: str
+    issue_id: str
+    severity: str
+    ignored: bool = False
+    translation_key: str | None = None

@@ -31,7 +31,7 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
   tool, what it returns, and what to call next.
 - HA errors become typed exceptions in `ha/errors.py`; the MCP layer converts them into
   `ToolError` with an actionable message.
-- Small, focused commits; `make lint test` must pass before committing.
+- Small, focused commits; `make check` must pass before committing.
 
 ## Commands
-`make install | dev-ha-up | dev-seed | run | test | lint | inspect`
+`make install | dev-ha-up | dev-seed | dev-simulate | run | test | lint | check | inspect`
