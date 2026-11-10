@@ -6,5 +6,8 @@ default_config:
 # Fake devices and entities: lights, switches, sensors, climate, covers, media players...
 demo:
 
+# Created by `make dev-ha-up`; written by HA's automation editor / config API.
+automation: !include automations.yaml
+
 logger:
   default: warning

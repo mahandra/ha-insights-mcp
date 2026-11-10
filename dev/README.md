@@ -42,6 +42,26 @@ make dev-seed
 This is a dev-only script that **writes** to the dev instance (creates areas, assigns
 devices). The MCP server itself is read-only in phase 1.
 
+## Simulate problems and history
+
+The demo integration is static. To get data for history analytics, device health and the
+automation audit:
+
+```bash
+make dev-simulate
+```
+
+Dev-only, **writes** to the dev instance:
+
+- creates 5 automations (`automations.yaml`): healthy, disabled, referencing missing
+  entities, never triggered, failing at runtime;
+- overrides states: low battery (8%), unavailable light, unknown humidity sensor;
+- toggles `binary_sensor.movement_backyard` 40 times (flapping), which triggers the failing
+  automation and produces error traces.
+
+State overrides are lost when HA restarts; re-run the script. HA keeps only the last 5
+traces per automation.
+
 ## Reset
 
 ```bash
