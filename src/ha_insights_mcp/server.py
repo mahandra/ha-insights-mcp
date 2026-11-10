@@ -13,6 +13,7 @@ from ha_insights_mcp.analytics.health import HealthThresholds
 from ha_insights_mcp.config import Settings
 from ha_insights_mcp.context import AppContext
 from ha_insights_mcp.ha import HAClient, HAError
+from ha_insights_mcp.prompts import register_prompts
 from ha_insights_mcp.resources import register_resources
 from ha_insights_mcp.snapshot import SnapshotProvider
 from ha_insights_mcp.tools import register_tools
@@ -21,9 +22,13 @@ logger = logging.getLogger(__name__)
 
 # Sent to the client at initialization; most clients put it into the model's context.
 INSTRUCTIONS = """\
-Read-only insights into a Home Assistant home.
-Typical flow: list_areas or search_entities to discover entity_ids, then get_entity_state
-for details. The resource ha://home/summary gives a compact overview of the whole home.
+Read-only analytics and diagnostics for a Home Assistant home.
+- Discover: list_areas, search_entities -> entity_ids; get_entity_state for one entity.
+- History: summarize_history (one entity), rank_activity (most active entities).
+- Health: check_device_health (offline, batteries, stale, flapping, HA repairs).
+- Automations: list_automations, audit_automations (problems), get_automation (details).
+The resource ha://home/summary gives a compact overview of the whole home.
+Results are already aggregated; do not ask for raw history.
 This server cannot change device states.
 """
 
@@ -61,6 +66,7 @@ def create_server(
     )
     register_tools(mcp)
     register_resources(mcp, app_context)
+    register_prompts(mcp)
     return mcp
 
 
