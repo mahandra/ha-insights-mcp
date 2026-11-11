@@ -13,7 +13,7 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
   v1 names (`FastMCP`, `mcp.server.fastmcp`) do not exist — check v2 docs before using an API.
 - httpx (async) for HA REST, `websockets` for HA WebSocket API (registries).
 - pydantic v2 for models, pydantic-settings for config.
-- pytest + pytest-asyncio + respx. Unit tests never talk to a real HA.
+- pytest (anyio plugin) + respx. Unit tests never talk to a real HA.
 
 ## Layout
 - `src/ha_insights_mcp/ha/` — Home Assistant client. **Must not import `mcp`.**
@@ -22,6 +22,9 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
   Test them with plain fixtures, no mocks.
 - `src/ha_insights_mcp/tools/` — one module per theme, each exposing `register(mcp)`;
   shared annotations in `tools/common.py`.
+- `src/ha_insights_mcp/actions/` — guarded actions: `policy.py`, `effects.py` (pure),
+  `guard.py` (read-only assessment), `executor.py` (**the only caller of
+  `HAClient.call_service`**, enforced by `tests/test_architecture.py`), `audit_log.py`.
 - `src/ha_insights_mcp/{server,context,resources,schemas}.py` — MCP layer.
 - `dev/` — dev Home Assistant config and dev-only scripts (`seed_areas.py`, `simulate.py`
   write to the dev HA; never import them from `src/`).
@@ -29,7 +32,11 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
 ## Rules
 - Security: HA token only from env/.env, stored as `SecretStr`; never log it, never put it in
   error messages or reprs.
-- Phase 1 is read-only: no HA write calls in `src/`. All tools are annotated `readOnlyHint=True`.
+- Writes: only `actions/executor.py` calls `call_service`, only after `guard.assess` with fresh
+  data, and every outcome goes to the audit log. Never add a write elsewhere, a `confirm`
+  tool argument, or a fallback that runs risky actions without a human confirmation.
+  Action tools are registered only with `ACTIONS_ENABLED`; all other tools are read-only.
+- Resolvers (`Resolve(...)`) may run on every round of a call: no side effects in them.
 - stdio transport: stdout belongs to JSON-RPC. Log to stderr only; never `print()`.
 - Tool outputs are pydantic models with compact fields. Never return raw HA JSON.
 - Aggregate on the server: return conclusions (counts, percentages, buckets), not raw

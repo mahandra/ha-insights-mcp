@@ -3,8 +3,8 @@
 An [MCP](https://modelcontextprotocol.io) server that gives LLM agents **analytics,
 diagnostics and guarded actions** for [Home Assistant](https://www.home-assistant.io).
 
-> Status: **phase 2 of 4** — read-only discovery, history analytics, device health and
-> automation audit over stdio. See [Roadmap](#roadmap).
+> Status: **phase 3 of 4** — discovery, history analytics, device health, automation audit
+> and opt-in guarded actions over stdio. See [Roadmap](#roadmap).
 
 ## Positioning: why another Home Assistant MCP server?
 
@@ -19,7 +19,7 @@ does **not** compete with them on "turn on the kitchen light".
 | Data | Current state of exposed entities | States joined with area/device/entity registries, recorder history and statistics, automation configs and traces |
 | Analytics | — | Time in state, change counts, min/mean/max trends, most active entities |
 | Diagnostics | — | Offline devices, low batteries, stale and flapping sensors, HA repairs, automation audit (broken references, failing runs) |
-| Actions | Direct intents | **Guarded**: allowlist, value bounds, dry-run, confirmation, audit log *(phase 3)* |
+| Actions | Direct intents | **Guarded** and off by default: allowlist, value bounds, preview, human confirmation, verification, audit log |
 | Output | Assist API responses | Compact, typed, token-efficient structured output |
 
 Use the built-in server to *control* your home. Use HA Insights to ask *"what is going
@@ -27,7 +27,8 @@ on in my home, what is broken, and is this change safe?"*. Both can run side by 
 
 ## Features
 
-All tools are annotated `readOnlyHint`; the server has no write path to Home Assistant.
+By default every tool is read-only (`readOnlyHint`) and the server never changes Home
+Assistant. Guarded actions are opt-in (`ACTIONS_ENABLED=true`), see below.
 
 **Discovery**
 
@@ -70,6 +71,16 @@ per domain, number of unavailable entities.
 - `investigate_entity(entity_id)` — state, 24h history, health, and the automations that
   reference the entity (found server-side and embedded in the prompt).
 
+**Guarded actions** (only with `ACTIONS_ENABLED=true` and a `policy.toml`)
+
+| Tool | Purpose |
+|---|---|
+| `preview_action(service, entity_ids, data?)` | Read-only dry run: every policy check, risk, whether a human must confirm (and whether this client can ask), expected change per entity, allowed value ranges |
+| `execute_action(service, entity_ids, reason, data?)` | Re-checks everything, asks the human for medium/high risk, calls HA, re-reads the state and reports `confirmed` / `pending` / `not_confirmed` |
+| `get_action_log(limit?, entity_id?, outcome?)` | Audit log: every attempt with reason, risk, confirmation, outcome |
+
+Resource `ha://actions/policy` shows the effective policy to the model up front.
+
 Outputs are pydantic models (MCP structured content with an output schema). Raw HA JSON is
 never returned: attributes are filtered per domain (no `supported_features` bitmasks, icons,
 pictures or GPS coordinates).
@@ -82,20 +93,24 @@ pictures or GPS coordinates).
 ┌───────▼──────────────────────────────────────────────┐
 │ server.py     MCPServer, lifespan, instructions      │  MCP layer
 │ tools/        discovery, history, health,            │
-│               automations  → schemas.py (outputs)    │
-│ resources.py  ha://home/summary                      │
+│               automations, actions → schemas.py      │
+│ resources.py  ha://home/summary, ha://actions/policy │
 │ prompts.py    home_health_report, investigate_entity │
 │ context.py    AppContext, HAError → ToolError        │
 ├──────────────────────────────────────────────────────┤
 │ analytics/    history · health · audit               │  pure functions
 │               (no I/O, no MCP; plain-fixture tests)  │
+│ actions/      policy · effects (pure)                │  guarded actions
+│               guard (assess) → executor (the only    │
+│               writer) → audit_log (SQLite)           │
 │ snapshot.py   states ⋈ registries, area resolution,  │
 │               TTL cache, single-flight refresh       │
 ├──────────────────────────────────────────────────────┤
 │ ha/client.py  REST (httpx): states, config           │  HA client
 │               WebSocket: registries, history,        │  (no MCP imports)
 │               statistics, automation configs,        │
-│               traces, repairs                        │
+│               traces, repairs, services,             │
+│               call_service (the only write)          │
 │ ha/errors.py  HAAuthError, HAConnectionError, ...    │
 └───────┬──────────────────────────────────────────────┘
         │  HTTP + WebSocket, Bearer token
@@ -122,9 +137,48 @@ Key decisions:
 - **Errors are part of the conversation.** HA failures become MCP tool errors with
   actionable text ("Unknown area 'attic'. Known areas: …"), so the model can self-correct.
 - **Security from day one.** Token only from env/`.env`, held as `SecretStr`, never logged
-  or included in errors. `entity_id` is validated before it reaches a URL. The server has
-  no write methods at all — annotations are hints, not enforcement.
+  or included in errors. `entity_id` is validated before it reaches a URL. Annotations are
+  hints for clients, not enforcement — enforcement lives in the server (see below).
 - **stdio hygiene.** stdout is the JSON-RPC channel; all logs go to stderr.
+
+## Guarded actions
+
+Writes are off unless `ACTIONS_ENABLED=true`. Then the server needs a policy file
+(`cp policy.example.toml policy.toml`); if it is missing or invalid the server refuses to
+start. Layers, in the order a request meets them:
+
+1. **Two tools, two permissions.** `preview_action` is read-only and can be auto-approved
+   in the client; `execute_action` is `destructiveHint`, so the client asks separately.
+2. **Allowlist** (`policy.toml`, which the model cannot change): domains, services and data
+   fields. Everything else is denied; `script`, `automation`, `scene`, `homeassistant`,
+   `shell_command`, `update` and a few more can never be allowed — they would bypass the
+   policy. Targets are explicit `entity_ids` only (no areas, no `all`, ≤ 10).
+3. **Value bounds** = policy ∩ the entity's own limits (e.g. `min_temp`) ∩ HA's service
+   schema. HA's own selector for `climate.set_temperature` is 0–250, so it is not enough.
+   Policy temperatures carry a unit and are converted to HA's unit system: 16–26 °C
+   becomes 60.8–78.8 °F on an imperial installation.
+4. **Risk** comes from the policy, not from the model: `low` runs, `medium`/`high` need a
+   human. More than `bulk_threshold` targets raise the risk one level.
+5. **Human confirmation via MCP elicitation.** The server builds the question from
+   validated data; the assistant's reason is shown labelled as unverified. The form needs a
+   ticked checkbox. There is no `confirm` argument — the model cannot confirm for the
+   user. Clients without elicitation get `no_confirmation_channel`: risky actions are
+   refused, low-risk ones still work.
+6. **Re-check before writing.** `execute_action` assesses again with fresh states; a
+   preview is never a permission. A rate limit (10/min) stops runaway loops.
+7. **Verification.** After the call the server re-reads the targets: devices can ignore a
+   command or jam. A timeout is reported as "may or may not have been applied".
+8. **Audit log.** SQLite, append-only (UPDATE/DELETE blocked by triggers): every attempt,
+   including refusals, with the reason, risk, confirmation, before/after states and HA's
+   `context_id` (links the entry to HA's logbook).
+
+The write path is one method (`HAClient.call_service`, over WebSocket because REST only
+answers "400: Bad Request"), called from one module (`actions/executor.py`); an
+architecture test fails the build otherwise.
+
+Confirmation uses the SDK's `Resolve` + `Elicit`, which works on both protocol eras: a live
+`elicitation/create` request on 2025-era connections and `InputRequiredResult` (the client
+retries the call with the answer) on 2026-07-28.
 
 ## Setup
 
@@ -158,6 +212,9 @@ Onboard, create a long-lived access token, then `make dev-seed` (areas) and
 | `BATTERY_LOW_PERCENT` | `20` | Low-battery threshold (below half of it = error) |
 | `STALE_HOURS` | `24` | Measurement sensor with no report for this long = stale |
 | `FLAPPING_CHANGES_PER_HOUR` | `20` | State changes within one hour = flapping |
+| `ACTIONS_ENABLED` | `false` | Register the guarded action tools |
+| `ACTIONS_POLICY_PATH` | `policy.toml` | Action policy (see `policy.example.toml`) |
+| `AUDIT_DB_PATH` | `data/audit.db` | SQLite audit log |
 | `LOG_LEVEL` | `INFO` | Logs go to stderr |
 
 ## Usage
@@ -187,7 +244,8 @@ claude mcp add ha-insights -- uv run --directory /path/to/ha_mcp ha-insights-mcp
 claude mcp list              # should show ha-insights: connected
 ```
 
-`--directory` makes uv run in the repo, so `.env` is found. In a session, ask
+`--directory` makes uv run in the repo, so `.env` is found. To allow guarded actions, add
+`-e ACTIONS_ENABLED=true` before `--`. In a session, ask
 "What is broken in my home?" or "How often did the backyard motion sensor trigger today?",
 reference the resource with `@ha-insights:ha://home/summary`, or run a prompt:
 `/mcp__ha-insights__home_health_report`.
@@ -226,8 +284,8 @@ mocked HA. Conventions for contributors and AI agents: [CLAUDE.md](CLAUDE.md).
 
 1. **Skeleton + read-only tools over stdio**, dev HA in Docker ← *done*
 2. **History analytics, device health, automation audit, prompts** ← *done*
-3. Guarded actions: domain allowlist, value bounds, dry-run, confirmation for risky
-   actions, SQLite audit log
+3. **Guarded actions**: allowlist, value bounds, preview, human confirmation, verification,
+   SQLite audit log ← *done*
 4. Streamable HTTP transport with auth, Docker image, README demo GIF
 
 ## License
