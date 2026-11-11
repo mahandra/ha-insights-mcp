@@ -3,8 +3,13 @@
 An [MCP](https://modelcontextprotocol.io) server that gives LLM agents **analytics,
 diagnostics and guarded actions** for [Home Assistant](https://www.home-assistant.io).
 
-> Status: **phase 3 of 4** — discovery, history analytics, device health, automation audit
-> and opt-in guarded actions over stdio. See [Roadmap](#roadmap).
+> Status: **all 4 phases done** — discovery, history analytics, device health, automation
+> audit and opt-in guarded actions, over stdio or authenticated Streamable HTTP (Docker).
+> See [Roadmap](#roadmap).
+
+The demo (`dev/demo.py`, a real MCP client) runs diagnostics, gets a thermostat value
+refused (°C policy on a °F home) and unlocks a door after a human confirmation. Render the
+GIF with [VHS](https://github.com/charmbracelet/vhs): `vhs docs/demo.tape` → `docs/demo.gif`.
 
 ## Positioning: why another Home Assistant MCP server?
 
@@ -89,7 +94,10 @@ pictures or GPS coordinates).
 
 ```
  MCP client (Claude, Inspector)
-        │  JSON-RPC over stdio
+        │  JSON-RPC over stdio, or Streamable HTTP /mcp + Bearer token
+┌───────▼──────────────────────────────────────────────┐
+│ http.py, auth.py  uvicorn app, SDK bearer auth,      │  HTTP transport
+│                   Host/Origin allowlist, /healthz    │  (MCP_TRANSPORT=http)
 ┌───────▼──────────────────────────────────────────────┐
 │ server.py     MCPServer, lifespan, instructions      │  MCP layer
 │ tools/        discovery, history, health,            │
@@ -212,6 +220,11 @@ Onboard, create a long-lived access token, then `make dev-seed` (areas) and
 | `BATTERY_LOW_PERCENT` | `20` | Low-battery threshold (below half of it = error) |
 | `STALE_HOURS` | `24` | Measurement sensor with no report for this long = stale |
 | `FLAPPING_CHANGES_PER_HOUR` | `20` | State changes within one hour = flapping |
+| `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP on `/mcp`) |
+| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8000` | HTTP listen address |
+| `MCP_PUBLIC_URL` | `http://<host>:<port>` | URL clients use (behind a proxy: its `https://` URL); sets the allowed `Host`/`Origin` |
+| `MCP_TOKENS_PATH` | `tokens.toml` | Bearer token hashes and scopes; required for HTTP |
+| `MCP_ALLOWED_ORIGINS` | `[]` | Extra browser origins (JSON list) |
 | `ACTIONS_ENABLED` | `false` | Register the guarded action tools |
 | `ACTIONS_POLICY_PATH` | `policy.toml` | Action policy (see `policy.example.toml`) |
 | `AUDIT_DB_PATH` | `data/audit.db` | SQLite audit log |
@@ -236,6 +249,55 @@ npx -y @modelcontextprotocol/inspector --cli uv run ha-insights-mcp --method too
 npx -y @modelcontextprotocol/inspector --cli uv run ha-insights-mcp \
   --method tools/call --tool-name search_entities --tool-arg query=garage
 ```
+
+### HTTP and Docker
+
+Over HTTP every request needs a bearer token. Tokens are stored only as SHA-256 hashes:
+
+```bash
+uv run ha-insights-mcp token create --name laptop --scope ha:read   # prints the token once
+# append the printed [[tokens]] entry to tokens.toml (see tokens.example.toml)
+MCP_TRANSPORT=http uv run ha-insights-mcp                          # http://127.0.0.1:8000/mcp
+```
+
+Docker, next to the dev HA (the service is behind the `mcp` compose profile):
+
+```bash
+make mcp-up                  # builds the image, http://localhost:8000/mcp (MCP_HOST_PORT to change)
+make mcp-logs / make mcp-down
+```
+
+The image (~165 MB) holds only the virtualenv and runs as an unprivileged user with a
+read-only root filesystem. Runtime inputs: `HA_URL`/`HA_TOKEN` (env), `/config/tokens.toml`
+and `/config/policy.toml` (read-only mounts), `/data` (audit log volume). `tokens.toml` holds
+only hashes, so it may be world-readable for the container user.
+
+Connect a client:
+
+```bash
+claude mcp add --transport http ha-insights http://localhost:8000/mcp \
+  --header "Authorization: Bearer hai_..."
+npx -y @modelcontextprotocol/inspector --cli http://localhost:8000/mcp --transport http \
+  --header "Authorization: Bearer hai_..." --method tools/list
+```
+
+**Security model over HTTP.**
+
+- Auth, session ownership and principal-bound `request_state` come from the SDK
+  (`token_verifier` + `AuthSettings`): a session or a pending confirmation cannot be reused
+  with another token. Unauthenticated requests get `401` with a pointer to
+  `/.well-known/oauth-protected-resource`.
+- Scopes: `ha:read` (all analytics, `preview_action`) and `ha:actions` (`execute_action`). A
+  read-only token gets `denied_scope`, logged, and the human is never asked to confirm it.
+- **A holder of an `ha:actions` token can also answer the confirmation prompt.** Over stdio
+  the client is the user's own app; over HTTP the confirmation is only as trustworthy as the
+  client that holds the token. Give `ha:actions` only to clients you trust.
+- DNS rebinding protection is always on with an explicit `Host`/`Origin` allowlist (the SDK
+  enables it by itself only for loopback binds, not for `0.0.0.0` in a container).
+- The server has no TLS: terminate HTTPS at a reverse proxy and set `MCP_PUBLIC_URL` to its
+  URL. A warning is logged when listening beyond loopback over plain HTTP.
+- `/healthz` needs no token and answers only `ok`.
+- The server refuses to start over HTTP without a valid token file (fail closed).
 
 ### Claude Code
 
@@ -278,7 +340,10 @@ make fmt
 ```
 
 Tool tests run the whole stack: in-memory MCP `Client` → server → real `HAClient` →
-mocked HA. Conventions for contributors and AI agents: [CLAUDE.md](CLAUDE.md).
+mocked HA. HTTP tests drive the real Starlette app through an ASGI transport (auth, Host and
+Origin checks, session ownership, scopes). CI (GitHub Actions) runs lint, tests, the image
+build and a container smoke test. Conventions for contributors and AI agents:
+[CLAUDE.md](CLAUDE.md).
 
 ## Roadmap
 
@@ -286,7 +351,7 @@ mocked HA. Conventions for contributors and AI agents: [CLAUDE.md](CLAUDE.md).
 2. **History analytics, device health, automation audit, prompts** ← *done*
 3. **Guarded actions**: allowlist, value bounds, preview, human confirmation, verification,
    SQLite audit log ← *done*
-4. Streamable HTTP transport with auth, Docker image, README demo GIF
+4. **Streamable HTTP with bearer auth and scopes, Docker image, CI, demo** ← *done*
 
 ## License
 

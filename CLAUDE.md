@@ -26,6 +26,8 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
   `guard.py` (read-only assessment), `executor.py` (**the only caller of
   `HAClient.call_service`**, enforced by `tests/test_architecture.py`), `audit_log.py`.
 - `src/ha_insights_mcp/{server,context,resources,schemas}.py` — MCP layer.
+- `src/ha_insights_mcp/{http,auth,cli}.py` — Streamable HTTP app, bearer tokens (hashes +
+  scopes), `token create` command.
 - `dev/` — dev Home Assistant config and dev-only scripts (`seed_areas.py`, `simulate.py`
   write to the dev HA; never import them from `src/`).
 
@@ -37,6 +39,9 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
   tool argument, or a fallback that runs risky actions without a human confirmation.
   Action tools are registered only with `ACTIONS_ENABLED`; all other tools are read-only.
 - Resolvers (`Resolve(...)`) may run on every round of a call: no side effects in them.
+- HTTP: never start without tokens, never accept tokens in query strings, never store or log
+  raw tokens. Scope checks use `auth.has_scope` (stdio = local and trusted). Keep the explicit
+  `TransportSecuritySettings`; the SDK default protects only loopback binds.
 - stdio transport: stdout belongs to JSON-RPC. Log to stderr only; never `print()`.
 - Tool outputs are pydantic models with compact fields. Never return raw HA JSON.
 - Aggregate on the server: return conclusions (counts, percentages, buckets), not raw
@@ -50,3 +55,4 @@ HA Insights MCP: an MCP server for Home Assistant focused on analytics, diagnost
 
 ## Commands
 `make install | dev-ha-up | dev-seed | dev-simulate | run | test | lint | check | inspect`
+`make docker-build | mcp-up | mcp-down | mcp-logs`
