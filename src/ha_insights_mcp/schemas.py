@@ -254,6 +254,7 @@ OutcomeOut = Literal[
     "cancelled_by_user",
     "no_confirmation_channel",
     "rate_limited",
+    "denied_scope",
 ]
 
 
@@ -291,6 +292,7 @@ class ActionLogEntry(BaseModel):
     outcome: OutcomeOut
     verification: VerificationOut | None
     detail: str | None
+    actor: str = Field(description="HTTP token name, or 'local' for stdio")
 
 
 class ActionLog(BaseModel):

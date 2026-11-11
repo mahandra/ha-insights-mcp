@@ -23,10 +23,11 @@ Outcome = Literal[
     "cancelled_by_user",  # the human dismissed the confirmation
     "no_confirmation_channel",  # confirmation needed, but the client cannot ask a human
     "rate_limited",
+    "denied_scope",  # the HTTP token is not allowed to execute actions
 ]
 Confirmation = Literal["not_required", "accepted", "declined", "cancelled", "unavailable"]
 
-SCHEMA_VERSION = 1
+# Version 1 schema; later versions are applied by _MIGRATIONS on every open.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,6 +51,12 @@ BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS actions_no_delete BEFORE DELETE ON actions
 BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
 """
+# user_version -> statement that upgrades the schema to that version.
+_MIGRATIONS = {
+    # Who acted: the HTTP token name, or 'local' for stdio (phase 4).
+    2: "ALTER TABLE actions ADD COLUMN actor TEXT NOT NULL DEFAULT 'local'",
+}
+SCHEMA_VERSION = max(_MIGRATIONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +76,7 @@ class AuditEntry:
     after: dict[str, str] = field(default_factory=dict)
     # confirmed | pending | not_confirmed | not_checked (worst over all targets)
     verification: str | None = None
+    actor: str = "local"
     id: int | None = None
 
 
@@ -81,7 +89,10 @@ class AuditLog:
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)
-            self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            (version,) = self._conn.execute("PRAGMA user_version").fetchone()
+            for target in sorted(v for v in _MIGRATIONS if v > max(version, 1)):
+                self._conn.execute(_MIGRATIONS[target])
+                self._conn.execute(f"PRAGMA user_version = {target}")
 
     def close(self) -> None:
         with self._lock:
@@ -111,12 +122,13 @@ class AuditLog:
             json.dumps(entry.before, sort_keys=True),
             json.dumps(entry.after, sort_keys=True),
             entry.verification,
+            entry.actor,
         )
         with self._lock, self._conn:
             cursor = self._conn.execute(
                 "INSERT INTO actions (at, service, entity_ids, data, reason, risk, confirmation,"
-                " outcome, detail, context_id, before, after, verification)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " outcome, detail, context_id, before, after, verification, actor)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
         return replace(entry, id=cursor.lastrowid)
@@ -154,4 +166,5 @@ def _entry(row: sqlite3.Row) -> AuditEntry:
         before=json.loads(row["before"]),
         after=json.loads(row["after"]),
         verification=row["verification"],
+        actor=row["actor"],
     )

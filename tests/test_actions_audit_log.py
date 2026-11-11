@@ -91,3 +91,29 @@ def test_rate_limiter_sliding_window() -> None:
     assert limiter.retry_after() == 0
     assert limiter.try_acquire()
     assert not limiter.try_acquire()
+
+
+async def test_v1_database_is_migrated(tmp_path: Path) -> None:
+    # A phase 3 log: no actor column, user_version 1.
+    path = tmp_path / "audit.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE actions (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL,"
+        " service TEXT NOT NULL, entity_ids TEXT NOT NULL, data TEXT NOT NULL,"
+        " reason TEXT NOT NULL, risk TEXT, confirmation TEXT, outcome TEXT NOT NULL,"
+        " detail TEXT, context_id TEXT, before TEXT NOT NULL, after TEXT NOT NULL,"
+        " verification TEXT);"
+        "INSERT INTO actions (at, service, entity_ids, data, reason, outcome, before, after)"
+        " VALUES ('2026-11-01T12:00:00+00:00', 'light.turn_on', '[\"light.a\"]', '{}',"
+        " 'old', 'executed', '{}', '{}');"
+        "PRAGMA user_version = 1;"
+    )
+    conn.close()
+
+    audit = AuditLog(path)
+    await audit.record(entry(1, actor="laptop"))
+    newest, oldest = await audit.recent()
+    audit.close()
+    assert (oldest.reason, oldest.actor) == ("old", "local")
+    assert newest.actor == "laptop"
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (2,)

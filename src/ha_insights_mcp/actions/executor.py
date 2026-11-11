@@ -47,6 +47,7 @@ def _entry(
     reason: str,
     outcome: Outcome,
     confirmation: Confirmation | None,
+    actor: str,
     detail: str | None = None,
 ) -> AuditEntry:
     request = assessment.request
@@ -61,6 +62,7 @@ def _entry(
         confirmation=confirmation,
         detail=detail,
         before={e: s.state for e, s in assessment.states.items()},
+        actor=actor,
     )
 
 
@@ -72,6 +74,7 @@ async def record_refusal(
     reason: str,
     outcome: Outcome,
     confirmation: Confirmation | None,
+    actor: str,
     detail: str,
 ) -> AuditEntry:
     return await log.record(
@@ -81,6 +84,7 @@ async def record_refusal(
             reason=reason,
             outcome=outcome,
             confirmation=confirmation,
+            actor=actor,
             detail=detail,
         )
     )
@@ -94,6 +98,7 @@ async def execute(
     at: datetime,
     reason: str,
     confirmation: Confirmation,
+    actor: str,
     verify_settings: VerifySettings,
 ) -> tuple[AuditEntry, dict[str, Verification], dict[str, str]]:
     """Run an allowed action. Returns the audit entry, per-entity verification and the
@@ -102,7 +107,14 @@ async def execute(
         raise ValueError("execute() called with an action the policy does not allow")
     request = assessment.request
     domain, _, service = request.service.partition(".")
-    base = _entry(assessment, at=at, reason=reason, outcome="executed", confirmation=confirmation)
+    base = _entry(
+        assessment,
+        at=at,
+        reason=reason,
+        outcome="executed",
+        confirmation=confirmation,
+        actor=actor,
+    )
     try:
         context_id = await client.call_service(domain, service, request.entity_ids, request.data)
     except HATimeoutError as exc:

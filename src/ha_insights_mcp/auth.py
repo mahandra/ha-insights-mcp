@@ -19,7 +19,6 @@ from typing import Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
-from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 Scope = Literal["ha:read", "ha:actions"]
@@ -112,11 +111,10 @@ class StaticTokenVerifier:
         )
 
 
-def require_scope(scope: Scope) -> None:
-    """Raise a ToolError if the HTTP caller's token lacks `scope`. No-op over stdio."""
+def has_scope(scope: Scope) -> bool:
+    """True over stdio (local, trusted) or if the HTTP caller's token has `scope`."""
     token = get_access_token()
-    if token is not None and scope not in token.scopes:
-        raise ToolError(f"This token does not allow this tool (needs scope {scope}).")
+    return token is None or scope in token.scopes
 
 
 def current_actor() -> str:

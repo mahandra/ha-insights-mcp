@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from mcp import Client
+from mcp import Client, types
 from mcp.client.streamable_http import streamable_http_client
 
 from ha_insights_mcp.auth import StaticTokenVerifier, TokenEntry, hash_token
@@ -14,6 +14,7 @@ from ha_insights_mcp.ha import HAClient
 from ha_insights_mcp.http import auth_settings, build_http_app
 from ha_insights_mcp.server import create_server
 from tests.conftest import (
+    HA_SERVICES,
     HA_URL,
     REGISTRY_RESULTS,
     TOKEN,
@@ -21,6 +22,7 @@ from tests.conftest import (
     actions_context,
     fake_ws_factory,
 )
+from tests.test_tools_execute import FakeHome
 
 pytestmark = pytest.mark.anyio
 
@@ -41,8 +43,10 @@ MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 
 
 @asynccontextmanager
-async def http_app(tmp_path: Path, *, with_actions: bool = False) -> AsyncIterator:
-    ws = FakeWebSocket(REGISTRY_RESULTS)
+async def http_app(
+    tmp_path: Path, *, with_actions: bool = False, ws: FakeWebSocket | None = None
+) -> AsyncIterator:
+    ws = ws or FakeWebSocket(REGISTRY_RESULTS)
     actions = actions_context(tmp_path) if with_actions else None
     verifier = StaticTokenVerifier(
         [
@@ -156,3 +160,70 @@ async def test_protected_resource_metadata(tmp_path) -> None:
         response = await http.get("/.well-known/oauth-protected-resource/mcp")
     assert response.status_code == 200
     assert response.json()["resource"] == f"{PUBLIC_URL}/mcp"
+
+
+# ------------------------------------------------------------ token scopes
+
+
+@pytest.fixture
+def home(ha_api) -> FakeHome:
+    home = FakeHome()
+    ha_api.get("/api/states").mock(side_effect=home.states_response)
+    return home
+
+
+def home_ws(home: FakeHome) -> FakeWebSocket:
+    return FakeWebSocket(
+        {**REGISTRY_RESULTS, "get_services": HA_SERVICES, "call_service": home.call_service}
+    )
+
+
+async def test_read_token_can_preview_but_not_execute(tmp_path, home) -> None:
+    asked: list = []
+
+    async def human(context, params):
+        asked.append(params)
+        return types.ElicitResult(action="accept", content={"confirm": True})
+
+    async with (
+        http_app(tmp_path, with_actions=True, ws=home_ws(home)) as app,
+        mcp_over_http(app, READER, elicitation_callback=human) as client,
+    ):
+        preview = await client.call_tool(
+            "preview_action", {"service": "lock.unlock", "entity_ids": ["lock.front_door"]}
+        )
+        result = await client.call_tool(
+            "execute_action",
+            {
+                "service": "lock.unlock",
+                "entity_ids": ["lock.front_door"],
+                "reason": "the user asked",
+            },
+        )
+        log = await client.call_tool("get_action_log", {})
+    assert preview.structured_content["allowed"] is True
+    assert result.structured_content["outcome"] == "denied_scope"
+    assert asked == []  # the human was not bothered
+    assert home.calls == []
+    (entry,) = log.structured_content["entries"]
+    assert (entry["outcome"], entry["actor"]) == ("denied_scope", "reader")
+
+
+async def test_actions_token_executes_and_is_named_in_the_log(tmp_path, home) -> None:
+    async with (
+        http_app(tmp_path, with_actions=True, ws=home_ws(home)) as app,
+        mcp_over_http(app, ADMIN) as client,
+    ):
+        result = await client.call_tool(
+            "execute_action",
+            {
+                "service": "light.turn_on",
+                "entity_ids": ["light.bed_light"],
+                "reason": "the user asked",
+            },
+        )
+        log = await client.call_tool("get_action_log", {})
+    assert not result.is_error, result.content
+    assert result.structured_content["outcome"] == "executed"
+    assert log.structured_content["entries"][0]["actor"] == "admin"
+    assert len(home.calls) == 1

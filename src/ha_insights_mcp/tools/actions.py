@@ -25,6 +25,7 @@ from ha_insights_mcp.actions.effects import describe, expect, is_met
 from ha_insights_mcp.actions.executor import execute, record_refusal
 from ha_insights_mcp.actions.guard import Assessment, assess
 from ha_insights_mcp.actions.policy import SERVICE_PATTERN, ActionRequest
+from ha_insights_mcp.auth import SCOPE_ACTIONS, current_actor, has_scope
 from ha_insights_mcp.context import ActionsContext, AppContext, app, ha_errors_as_tool_errors
 from ha_insights_mcp.ha.models import ENTITY_ID_PATTERN
 from ha_insights_mcp.schemas import (
@@ -79,7 +80,7 @@ class Confirm(BaseModel):
 class NotAsked(BaseModel):
     """Resolver outcome when no question was shown to the human."""
 
-    why: Literal["not_required", "unavailable", "denied", "rate_limited"]
+    why: Literal["not_required", "unavailable", "denied", "rate_limited", "no_scope"]
 
 
 def actions_of(ctx: Context[AppContext]) -> ActionsContext:
@@ -209,6 +210,9 @@ async def ask_confirmation(
     May run on every round of a multi-round call, so it has no side effects.
     """
     actions = actions_of(ctx)
+    if not has_scope(SCOPE_ACTIONS):
+        # Never ask a human to confirm what this token may not do anyway.
+        return NotAsked(why="no_scope")
     assessment = await assess_request(ctx, request_of(service, entity_ids, data or {}))
     decision = assessment.decision
     if not decision.allowed:
@@ -306,7 +310,7 @@ def register_execute(mcp: MCPServer) -> None:
         # Re-assess: states may have changed while the human was deciding.
         assessment = await assess_request(ctx, request_of(service, entity_ids, data or {}))
         decision = assessment.decision
-        at = context.now()
+        at, actor = context.now(), current_actor()
 
         async def refuse(outcome: Outcome, answer: Confirmation | None, msg: str) -> ActionResult:
             entry = await record_refusal(
@@ -316,10 +320,18 @@ def register_execute(mcp: MCPServer) -> None:
                 reason=reason,
                 outcome=outcome,
                 confirmation=answer,
+                actor=actor,
                 detail=msg,
             )
             return action_result(entry, assessment, msg)
 
+        if not has_scope(SCOPE_ACTIONS):
+            return await refuse(
+                "denied_scope",
+                None,
+                f"This client's token lacks the {SCOPE_ACTIONS} scope: it may preview actions "
+                "but not execute them. Nothing was changed.",
+            )
         if not decision.allowed:
             return await refuse(
                 "denied_policy",
@@ -347,6 +359,7 @@ def register_execute(mcp: MCPServer) -> None:
             at=at,
             reason=reason,
             confirmation=answer,
+            actor=actor,
             verify_settings=actions.verify,
         )
         if entry.outcome == "executed":
@@ -385,6 +398,7 @@ def register_log(mcp: MCPServer) -> None:
                     outcome=e.outcome,
                     verification=e.verification,
                     detail=e.detail,
+                    actor=e.actor,
                 )
                 for e in entries
             ]
