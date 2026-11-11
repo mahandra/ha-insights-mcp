@@ -25,7 +25,7 @@ def entry(i: int = 0, **overrides) -> AuditEntry:
         "context_id": f"ctx{i}",
         "before": {"light.bed_light": "off"},
         "after": {"light.bed_light": "on"},
-        "verified": True,
+        "verification": "confirmed",
     }
     return AuditEntry(**(values | overrides))
 

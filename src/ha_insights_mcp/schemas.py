@@ -241,3 +241,38 @@ class ActionPreview(BaseModel):
         description="Allowed values per data field (policy ∩ device limits ∩ HA schema)"
     )
     next_step: str
+
+
+VerificationOut = Literal["confirmed", "pending", "not_confirmed", "not_checked"]
+OutcomeOut = Literal[
+    "executed",
+    "failed",
+    "unknown",
+    "denied_policy",
+    "declined_by_user",
+    "cancelled_by_user",
+    "no_confirmation_channel",
+    "rate_limited",
+]
+
+
+class TargetResult(BaseModel):
+    entity_id: str
+    before: str | None
+    after: str | None = Field(description="State re-read after the call")
+    verification: VerificationOut = Field(
+        description=(
+            "confirmed: the expected state was observed; pending: still moving; "
+            "not_confirmed: the device did not end up as expected; not_checked: unpredictable"
+        )
+    )
+
+
+class ActionResult(BaseModel):
+    outcome: OutcomeOut = Field(description="Only 'executed' means the call reached HA")
+    action_id: int = Field(description="Audit log id (see get_action_log)")
+    risk: RiskOut | None
+    confirmation: Literal["not_required", "accepted", "declined", "cancelled", "unavailable"]
+    message: str = Field(description="What happened, to relay to the user")
+    failed_checks: list[ActionCheckOut]
+    results: list[TargetResult]

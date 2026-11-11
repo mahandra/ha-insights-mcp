@@ -9,6 +9,7 @@ from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 
 from ha_insights_mcp.actions.audit_log import AuditLog
+from ha_insights_mcp.actions.executor import VerifySettings
 from ha_insights_mcp.actions.policy import Policy
 from ha_insights_mcp.actions.ratelimit import RateLimiter
 from ha_insights_mcp.analytics.health import HealthThresholds
@@ -23,6 +24,7 @@ class ActionsContext:
     policy: Policy
     audit_log: AuditLog
     limiter: RateLimiter
+    verify: VerifySettings = field(default_factory=VerifySettings)
 
 
 @dataclass(frozen=True, slots=True)

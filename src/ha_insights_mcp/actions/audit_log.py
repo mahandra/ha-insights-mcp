@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS actions (
     context_id TEXT,
     before TEXT NOT NULL,
     after TEXT NOT NULL,
-    verified INTEGER
+    verification TEXT
 );
 CREATE INDEX IF NOT EXISTS actions_at ON actions (at);
 CREATE TRIGGER IF NOT EXISTS actions_no_update BEFORE UPDATE ON actions
@@ -67,7 +67,8 @@ class AuditEntry:
     # entity_id -> state before and after the call
     before: dict[str, str] = field(default_factory=dict)
     after: dict[str, str] = field(default_factory=dict)
-    verified: bool | None = None
+    # confirmed | pending | not_confirmed | not_checked (worst over all targets)
+    verification: str | None = None
     id: int | None = None
 
 
@@ -109,12 +110,12 @@ class AuditLog:
             entry.context_id,
             json.dumps(entry.before, sort_keys=True),
             json.dumps(entry.after, sort_keys=True),
-            None if entry.verified is None else int(entry.verified),
+            entry.verification,
         )
         with self._lock, self._conn:
             cursor = self._conn.execute(
                 "INSERT INTO actions (at, service, entity_ids, data, reason, risk, confirmation,"
-                " outcome, detail, context_id, before, after, verified)"
+                " outcome, detail, context_id, before, after, verification)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
@@ -152,5 +153,5 @@ def _entry(row: sqlite3.Row) -> AuditEntry:
         context_id=row["context_id"],
         before=json.loads(row["before"]),
         after=json.loads(row["after"]),
-        verified=None if row["verified"] is None else bool(row["verified"]),
+        verification=row["verification"],
     )

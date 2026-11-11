@@ -14,6 +14,7 @@ from mcp import Client
 from pydantic import SecretStr
 
 from ha_insights_mcp.actions.audit_log import AuditLog
+from ha_insights_mcp.actions.executor import VerifySettings
 from ha_insights_mcp.actions.policy import Policy, load_policy
 from ha_insights_mcp.actions.ratelimit import RateLimiter
 from ha_insights_mcp.context import ActionsContext
@@ -288,4 +289,5 @@ def actions_context(tmp_path: Path, policy: Policy | None = None) -> ActionsCont
         policy=policy,
         audit_log=AuditLog(tmp_path / "audit.db"),
         limiter=RateLimiter(policy.defaults.rate_limit_per_minute),
+        verify=VerifySettings(timeout=0.3, interval=0.01),
     )
