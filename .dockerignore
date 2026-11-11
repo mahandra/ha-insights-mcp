@@ -1,0 +1,15 @@
+# Secrets and local state never enter the build context.
+.env
+token
+tokens.toml
+policy.toml
+data/
+*.db
+# Not needed in the image.
+.git/
+.venv/
+dev/
+tests/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/

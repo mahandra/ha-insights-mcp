@@ -1,4 +1,4 @@
-.PHONY: help install dev-ha-up dev-ha-down dev-ha-logs dev-seed dev-simulate run test lint fmt check inspect
+.PHONY: help install dev-ha-up dev-ha-down dev-ha-logs dev-seed dev-simulate run test lint fmt check inspect docker-build mcp-up mcp-down mcp-logs
 
 help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -41,3 +41,18 @@ check: lint test ## Lint + tests (run before every commit)
 
 inspect: ## Open MCP Inspector against the stdio server
 	npx -y @modelcontextprotocol/inspector uv run ha-insights-mcp
+
+docker-build: ## Build the HTTP server image (ha-insights-mcp:dev)
+	docker build -t ha-insights-mcp:dev .
+
+mcp-up: ## Run the HTTP server in Docker next to the dev HA (needs tokens.toml)
+	@test -f tokens.toml || (echo "tokens.toml missing: see tokens.example.toml" && exit 1)
+	@test -f policy.toml || cp policy.example.toml policy.toml
+	docker compose --profile mcp up -d --build ha-insights
+	@echo "MCP: http://localhost:$${MCP_HOST_PORT:-8000}/mcp"
+
+mcp-down: ## Stop the HTTP server container
+	docker compose --profile mcp rm -sf ha-insights
+
+mcp-logs: ## Follow the HTTP server logs
+	docker compose --profile mcp logs -f ha-insights

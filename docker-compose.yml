@@ -1,5 +1,6 @@
 # Dev Home Assistant with the `demo` integration (fake lights, sensors, climate, etc.).
-# For local development only — not a production setup.
+# For local development only — not a production setup. The MCP server service is behind
+# the "mcp" profile, so `docker compose up -d` still starts only Home Assistant.
 services:
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:2026.10.4
@@ -11,3 +12,35 @@ services:
     environment:
       - TZ=Europe/Moscow
     restart: unless-stopped
+
+  # HA Insights MCP over HTTP (phase 4). Opt-in: `docker compose --profile mcp up -d`.
+  # Needs ./tokens.toml (and ./policy.toml if ACTIONS_ENABLED=true); HA_TOKEN from .env.
+  ha-insights:
+    profiles: ["mcp"]
+    build: .
+    image: ha-insights-mcp:dev
+    container_name: ha-insights-mcp
+    env_file: .env
+    environment:
+      HA_URL: http://homeassistant:8123
+      MCP_PUBLIC_URL: http://localhost:${MCP_HOST_PORT:-8000}
+      ACTIONS_ENABLED: ${ACTIONS_ENABLED:-false}
+    ports:
+      # Loopback only; use an HTTPS reverse proxy to expose it.
+      - "127.0.0.1:${MCP_HOST_PORT:-8000}:8000"
+    volumes:
+      - ./tokens.toml:/config/tokens.toml:ro
+      - ./policy.toml:/config/policy.toml:ro
+      - ha-insights-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - homeassistant
+    restart: unless-stopped
+
+volumes:
+  ha-insights-data:
