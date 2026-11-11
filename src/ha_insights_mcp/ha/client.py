@@ -1,15 +1,18 @@
 """Thin async client for the Home Assistant REST and WebSocket APIs.
 
 - REST (httpx) for states and config.
-- WebSocket for the area/device/entity registries, which REST does not expose.
+- WebSocket for registries, history, statistics, traces, service schemas and service
+  calls (WS reports precise validation errors; REST answers a bare "400: Bad Request").
 
 This module knows nothing about MCP. It raises the typed errors from `ha.errors`.
-Phase 1: read-only — there are intentionally no methods that change HA state.
+`call_service` is the only method that changes HA state; only `actions.executor` may
+call it (enforced by tests/test_architecture.py).
 """
 
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Callable, Iterable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -47,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 # Registry lists on big installations can be several MB.
 _WS_MAX_MESSAGE_BYTES = 32 * 1024 * 1024
+_NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +261,52 @@ class HAClient:
             )
             for t in result or []
         ]
+
+    async def get_services(self) -> dict[str, dict[str, Any]]:
+        """Service schemas by domain: fields, selectors (with min/max), required flags."""
+        (result,) = await self._ws_commands({"type": "get_services"})
+        if not isinstance(result, dict):
+            raise HAResponseError("Unexpected get_services payload: expected an object")
+        return result
+
+    async def call_service(
+        self, domain: str, service: str, entity_ids: list[str], data: dict[str, Any]
+    ) -> str | None:
+        """Call a service on explicit entities. Returns HA's context id, which links the
+        resulting state changes (logbook) to this call.
+
+        The only write in this client. Callers must have checked the action policy first.
+        """
+        if not (_NAME_RE.fullmatch(domain) and _NAME_RE.fullmatch(service)):
+            raise ValueError(f"Invalid service {domain}.{service!r}")
+        invalid = [e for e in entity_ids if not ENTITY_ID_RE.fullmatch(e)]
+        if not entity_ids or invalid:
+            raise ValueError(f"Invalid target entity_ids: {invalid or entity_ids}")
+        if "entity_id" in data or "area_id" in data or "device_id" in data:
+            raise ValueError("Targets must be passed as entity_ids, not in service data")
+        command = {
+            "type": "call_service",
+            "domain": domain,
+            "service": service,
+            "service_data": data,
+            "target": {"entity_id": entity_ids},
+        }
+        try:
+            (result,) = await self._ws_commands(command, allow_errors=True)
+        except HATimeoutError:
+            # The command may have reached HA: the outcome is unknown, not "failed".
+            raise HATimeoutError(
+                f"Home Assistant did not answer {domain}.{service} within {self._timeout:g}s; "
+                "the action may or may not have been applied"
+            ) from None
+        if isinstance(result, WSCommandError):
+            if result.code == "not_found":
+                raise HANotFoundError(f"Service {domain}.{service} not found")
+            raise HAResponseError(
+                f"Home Assistant rejected {domain}.{service}: {result.message or result.code}"
+            )
+        context = (result or {}).get("context") or {}
+        return context.get("id")
 
     async def list_repair_issues(self) -> list[RepairIssue]:
         """Issues Home Assistant itself has raised (Settings -> Repairs)."""
