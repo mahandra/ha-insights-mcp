@@ -230,6 +230,8 @@ dependencies = [
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "starlette" },
+    { name = "uvicorn" },
     { name = "websockets" },
 ]
 
@@ -247,6 +249,8 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.3,<3" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
+    { name = "starlette", specifier = ">=0.40" },
+    { name = "uvicorn", specifier = ">=0.30" },
     { name = "websockets", specifier = ">=13" },
 ]
 

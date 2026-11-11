@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime
 
+from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 
 from ha_insights_mcp import __version__
@@ -49,6 +51,8 @@ def create_server(
     now: Callable[[], datetime] | None = None,
     thresholds: HealthThresholds | None = None,
     actions: ActionsContext | None = None,
+    token_verifier: TokenVerifier | None = None,
+    auth: AuthSettings | None = None,
 ) -> MCPServer:
     client = client_factory()
     app_context = AppContext(client=client, snapshots=SnapshotProvider(client, ttl=cache_ttl))
@@ -76,6 +80,8 @@ def create_server(
         version=__version__,
         instructions=INSTRUCTIONS + (ACTIONS_NOTE if actions else READ_ONLY_NOTE),
         lifespan=lifespan,
+        token_verifier=token_verifier,
+        auth=auth,
     )
     register_tools(mcp)
     if actions is not None:
@@ -104,6 +110,13 @@ def actions_from_settings(settings: Settings) -> ActionsContext | None:
 
 
 def server_from_settings(settings: Settings) -> MCPServer:
+    """Raises PolicyError / AuthConfigError on invalid action policy or token file."""
+    verifier, auth = None, None
+    if settings.mcp_transport == "http":
+        # Imported here: the stdio path does not need uvicorn/starlette.
+        from ha_insights_mcp.http import auth_settings, token_verifier
+
+        verifier, auth = token_verifier(settings), auth_settings(settings.public_url)
     return create_server(
         client_factory=lambda: HAClient(
             settings.ha_url, settings.ha_token, timeout=settings.ha_timeout_seconds
@@ -115,4 +128,6 @@ def server_from_settings(settings: Settings) -> MCPServer:
             flapping_changes_per_hour=settings.flapping_changes_per_hour,
         ),
         actions=actions_from_settings(settings),
+        token_verifier=verifier,
+        auth=auth,
     )
