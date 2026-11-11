@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.9"
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Lint
+        run: |
+          uv run ruff check src tests dev
+          uv run ruff format --check src tests dev
+      - name: Test
+        run: uv run pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t ha-insights-mcp:ci .
+      - name: Smoke test
+        # Without a token file the server must refuse to start (fail closed); with one it
+        # must become healthy. No Home Assistant is needed for either.
+        run: |
+          set -eu
+          if docker run --rm -e HA_TOKEN=x ha-insights-mcp:ci; then
+            echo "started without tokens" && exit 1
+          fi
+          mkdir -p ci-config
+          printf '[[tokens]]\nname = "ci"\nsha256 = "%s"\n' "$(printf 'hai_ci' | sha256sum | cut -d' ' -f1)" > ci-config/tokens.toml
+          docker run -d --name mcp -e HA_TOKEN=x -e HA_URL=http://127.0.0.1:9 \
+            -v "$PWD/ci-config:/config:ro" -p 127.0.0.1:8000:8000 ha-insights-mcp:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/healthz && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/mcp)" = 401
+          docker rm -f mcp
