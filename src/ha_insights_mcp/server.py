@@ -11,25 +11,32 @@ from mcp.server.mcpserver import MCPServer
 from ha_insights_mcp import __version__
 from ha_insights_mcp.analytics.health import HealthThresholds
 from ha_insights_mcp.config import Settings
-from ha_insights_mcp.context import AppContext
+from ha_insights_mcp.context import ActionsContext, AppContext
 from ha_insights_mcp.ha import HAClient, HAError
 from ha_insights_mcp.prompts import register_prompts
 from ha_insights_mcp.resources import register_resources
 from ha_insights_mcp.snapshot import SnapshotProvider
+from ha_insights_mcp.tools import actions as action_tools
 from ha_insights_mcp.tools import register_tools
 
 logger = logging.getLogger(__name__)
 
 # Sent to the client at initialization; most clients put it into the model's context.
 INSTRUCTIONS = """\
-Read-only analytics and diagnostics for a Home Assistant home.
+Analytics and diagnostics for a Home Assistant home.
 - Discover: list_areas, search_entities -> entity_ids; get_entity_state for one entity.
 - History: summarize_history (one entity), rank_activity (most active entities).
 - Health: check_device_health (offline, batteries, stale, flapping, HA repairs).
 - Automations: list_automations, audit_automations (problems), get_automation (details).
 The resource ha://home/summary gives a compact overview of the whole home.
 Results are already aggregated; do not ask for raw history.
-This server cannot change device states.
+"""
+READ_ONLY_NOTE = "This server cannot change device states.\n"
+ACTIONS_NOTE = """\
+Guarded actions: preview_action (checks only), then execute_action with a short reason.
+Allowed services and value ranges: resource ha://actions/policy. Risky actions are
+confirmed by the human; never claim an action happened unless execute_action says so.
+get_action_log lists past actions.
 """
 
 
@@ -38,6 +45,7 @@ def create_server(
     cache_ttl: float,
     now: Callable[[], datetime] | None = None,
     thresholds: HealthThresholds | None = None,
+    actions: ActionsContext | None = None,
 ) -> MCPServer:
     client = client_factory()
     app_context = AppContext(client=client, snapshots=SnapshotProvider(client, ttl=cache_ttl))
@@ -45,6 +53,8 @@ def create_server(
         app_context = replace(app_context, now=now)
     if thresholds is not None:
         app_context = replace(app_context, thresholds=thresholds)
+    if actions is not None:
+        app_context = replace(app_context, actions=actions)
 
     @asynccontextmanager
     async def lifespan(_: MCPServer) -> AsyncIterator[AppContext]:
@@ -61,10 +71,12 @@ def create_server(
         "ha-insights",
         title="HA Insights",
         version=__version__,
-        instructions=INSTRUCTIONS,
+        instructions=INSTRUCTIONS + (ACTIONS_NOTE if actions else READ_ONLY_NOTE),
         lifespan=lifespan,
     )
     register_tools(mcp)
+    if actions is not None:
+        action_tools.register(mcp)
     register_resources(mcp, app_context)
     register_prompts(mcp)
     return mcp

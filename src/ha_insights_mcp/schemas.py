@@ -200,3 +200,44 @@ class AuditReport(BaseModel):
     automations_checked: int
     counts: dict[str, int] = Field(description="Findings per severity, before min_severity")
     findings: list[AuditFinding] = Field(description="Most severe first")
+
+
+# ------------------------------------------------------------------ actions
+
+RiskOut = Literal["low", "medium", "high"]
+
+
+class ActionCheckOut(BaseModel):
+    check: str = Field(description="Rule name, e.g. service_allowed, value.temperature")
+    ok: bool
+    detail: str
+
+
+class PlannedChange(BaseModel):
+    entity_id: str
+    name: str
+    current_state: str
+    expected: str | None = Field(
+        description="Expected change, e.g. 'state off -> on'; null if it cannot be predicted"
+    )
+    already_satisfied: bool = Field(description="The entity is already in the expected state")
+
+
+class Bounds(BaseModel):
+    min: float | None
+    max: float | None
+
+
+class ActionPreview(BaseModel):
+    allowed: bool = Field(description="True if execute_action would pass every policy check now")
+    risk: RiskOut | None = Field(description="Null when the service is not in the policy")
+    needs_confirmation: bool = Field(description="execute_action will ask the human to confirm")
+    confirmation_available: bool = Field(
+        description="The MCP client can show a confirmation to the human (elicitation)"
+    )
+    checks: list[ActionCheckOut]
+    changes: list[PlannedChange]
+    allowed_ranges: dict[str, Bounds] = Field(
+        description="Allowed values per data field (policy ∩ device limits ∩ HA schema)"
+    )
+    next_step: str

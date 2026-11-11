@@ -8,9 +8,21 @@ from datetime import UTC, datetime
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 
+from ha_insights_mcp.actions.audit_log import AuditLog
+from ha_insights_mcp.actions.policy import Policy
+from ha_insights_mcp.actions.ratelimit import RateLimiter
 from ha_insights_mcp.analytics.health import HealthThresholds
 from ha_insights_mcp.ha import HAClient, HAError, HANotFoundError
 from ha_insights_mcp.snapshot import SnapshotProvider
+
+
+@dataclass(frozen=True, slots=True)
+class ActionsContext:
+    """Present only when guarded actions are enabled."""
+
+    policy: Policy
+    audit_log: AuditLog
+    limiter: RateLimiter
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +32,7 @@ class AppContext:
     thresholds: HealthThresholds = field(default_factory=HealthThresholds)
     # Injectable for deterministic tests of time-window analytics.
     now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+    actions: ActionsContext | None = None
 
 
 def app(ctx: Context[AppContext]) -> AppContext:

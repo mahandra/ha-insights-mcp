@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,6 +13,10 @@ import respx
 from mcp import Client
 from pydantic import SecretStr
 
+from ha_insights_mcp.actions.audit_log import AuditLog
+from ha_insights_mcp.actions.policy import Policy, load_policy
+from ha_insights_mcp.actions.ratelimit import RateLimiter
+from ha_insights_mcp.context import ActionsContext
 from ha_insights_mcp.ha import HAClient
 from ha_insights_mcp.server import create_server
 
@@ -208,18 +213,26 @@ def ha_api():
 
 @asynccontextmanager
 async def mcp_client(
-    ws_results: dict[str, Any] | None = None, now: Callable[[], datetime] | None = None
+    ws_results: dict[str, Any] | None = None,
+    now: Callable[[], datetime] | None = None,
+    actions: ActionsContext | None = None,
+    ws: FakeWebSocket | None = None,
+    **client_options: Any,
 ) -> AsyncIterator[Client]:
-    """In-memory MCP client -> server -> real HAClient -> fake WebSocket (+ respx REST)."""
-    ws = FakeWebSocket({**REGISTRY_RESULTS, **(ws_results or {})})
+    """In-memory MCP client -> server -> real HAClient -> fake WebSocket (+ respx REST).
+
+    `client_options` go to `mcp.Client`, e.g. elicitation_callback or mode="legacy".
+    """
+    ws = ws or FakeWebSocket({**REGISTRY_RESULTS, **(ws_results or {})})
     server = create_server(
         client_factory=lambda: HAClient(
             HA_URL, TOKEN, timeout=2, ws_connect_factory=fake_ws_factory(ws)
         ),
         cache_ttl=10,
         now=now,
+        actions=actions,
     )
-    async with Client(server) as client:
+    async with Client(server, **client_options) as client:
         yield client
 
 
@@ -232,3 +245,47 @@ async def call(client: Client, tool: str, **args: Any) -> Any:
 def error_text(result: Any) -> str:
     assert result.is_error
     return result.content[0].text
+
+
+# ------------------------------------------------------------------ actions
+
+ACTION_STATES = [
+    state("lock.front_door", "locked", friendly_name="Front Door"),
+    state("cover.garage_door", "closed", friendly_name="Garage Door", current_position=0),
+    state("light.office", "unavailable", friendly_name="Office"),
+    *(state(f"light.bulk_{i}", "off", friendly_name=f"Bulk {i}") for i in range(5)),
+]
+
+HA_SERVICES = {
+    "light": {
+        "turn_on": {
+            "fields": {
+                "brightness_pct": {"selector": {"number": {"min": 0, "max": 100}}},
+                "advanced_fields": {
+                    "fields": {"transition": {"selector": {"number": {"min": 0, "max": 300}}}}
+                },
+            }
+        },
+        "turn_off": {"fields": {"transition": {"selector": {"number": {"min": 0, "max": 300}}}}},
+        "toggle": {"fields": {}},
+    },
+    "climate": {
+        "set_temperature": {
+            "fields": {"temperature": {"selector": {"number": {"min": 0, "max": 250}}}}
+        },
+        "set_hvac_mode": {"fields": {"hvac_mode": {"selector": {"state": {}}}}},
+    },
+    "lock": {"lock": {"fields": {"code": {}}}, "unlock": {"fields": {"code": {}}}},
+    "cover": {"open_cover": {"fields": {}}, "close_cover": {"fields": {}}},
+}
+
+EXAMPLE_POLICY = Path(__file__).parent.parent / "policy.example.toml"
+
+
+def actions_context(tmp_path: Path, policy: Policy | None = None) -> ActionsContext:
+    policy = policy or load_policy(EXAMPLE_POLICY)
+    return ActionsContext(
+        policy=policy,
+        audit_log=AuditLog(tmp_path / "audit.db"),
+        limiter=RateLimiter(policy.defaults.rate_limit_per_minute),
+    )
