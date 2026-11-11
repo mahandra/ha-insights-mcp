@@ -26,4 +26,6 @@ async def assess(client: HAClient, policy: Policy, request: ActionRequest) -> As
     wanted = set(request.entity_ids)
     states = {s.entity_id: s for s in await client.get_states() if s.entity_id in wanted}
     services = await client.get_services()
-    return Assessment(request, evaluate(policy, request, states, services), states)
+    unit = (await client.get_config()).temperature_unit
+    decision = evaluate(policy, request, states, services, temperature_unit=unit)
+    return Assessment(request, decision, states)

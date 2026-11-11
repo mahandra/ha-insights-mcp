@@ -9,6 +9,7 @@
 max_entities = 10
 bulk_threshold = 3
 rate_limit_per_minute = 10
+temperature_unit = "°C"  # unit of temperature bounds below; converted to HA's unit system
 
 [domains.light]
 risk = "low"
@@ -27,8 +28,8 @@ fields = ["percentage"]
 [domains.climate]
 risk = "medium"
 services = ["set_temperature", "set_hvac_mode"]
-fields = ["temperature", "hvac_mode"]
-bounds = { temperature = [16, 26] }
+fields = ["temperature", "target_temp_low", "target_temp_high", "hvac_mode"]
+bounds = { temperature = [16, 26], target_temp_low = [16, 26], target_temp_high = [16, 26] }
 
 [domains.cover]
 risk = "medium"

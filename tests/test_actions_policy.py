@@ -6,6 +6,7 @@ from ha_insights_mcp.actions.policy import (
     ActionRequest,
     Policy,
     PolicyError,
+    convert_temperature,
     evaluate,
     load_policy,
     schema_fields,
@@ -233,3 +234,29 @@ def test_bulk_action_raises_risk(policy: Policy) -> None:
     d = decide(policy, "light.turn_off", [f"light.l{i}" for i in range(4)])
     assert d.allowed
     assert (d.risk, d.needs_confirmation) == ("medium", True)
+
+
+def test_temperature_bounds_follow_ha_unit_system(policy: Policy) -> None:
+    # A US installation: HA reports and accepts °F. The policy's 16..26 °C becomes
+    # 60.8..78.8 °F, so "24" (which would be -4 °C) is refused.
+    fahrenheit = EntityState.model_validate(
+        state("climate.us", "heat", temperature=68, min_temp=45, max_temp=95)
+    )
+    states = {"climate.us": fahrenheit}
+
+    def decide_f(value: float):
+        request = ActionRequest("climate.set_temperature", ["climate.us"], {"temperature": value})
+        return evaluate(policy, request, states, SERVICES, temperature_unit="°F")
+
+    low = decide_f(24)
+    assert not low.allowed
+    assert low.failures[0].detail == "24 is outside [60.8, 78.8] °F"
+    assert low.effective_bounds["temperature"] == (60.8, 78.8)
+    assert low.units["temperature"] == "°F"
+    assert decide_f(72).allowed
+
+
+def test_convert_temperature() -> None:
+    assert convert_temperature(16, "°C", "°F") == 60.8
+    assert convert_temperature(78.8, "°F", "°C") == 26
+    assert convert_temperature(20, "°C", "°C") == 20

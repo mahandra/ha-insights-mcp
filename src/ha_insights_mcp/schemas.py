@@ -226,6 +226,7 @@ class PlannedChange(BaseModel):
 class Bounds(BaseModel):
     min: float | None
     max: float | None
+    unit: str | None = Field(default=None, description="Set for temperatures (HA's unit)")
 
 
 class ActionPreview(BaseModel):

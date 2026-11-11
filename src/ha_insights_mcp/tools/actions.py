@@ -176,7 +176,7 @@ def register_preview(mcp: MCPServer) -> None:
             ],
             changes=planned_changes(assessment),
             allowed_ranges={
-                name: Bounds(min=_finite(low), max=_finite(high))
+                name: Bounds(min=_finite(low), max=_finite(high), unit=decision.units.get(name))
                 for name, (low, high) in decision.effective_bounds.items()
             },
             next_step=next_step,

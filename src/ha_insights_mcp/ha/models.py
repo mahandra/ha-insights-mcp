@@ -71,6 +71,12 @@ class EntityRegistryEntry(_HAModel):
 class HAConfig(_HAModel):
     version: str
     location_name: str | None = None
+    unit_system: dict[str, Any] = {}
+
+    @property
+    def temperature_unit(self) -> str | None:
+        unit = self.unit_system.get("temperature")
+        return str(unit) if unit else None
 
 
 class Registries(_HAModel):

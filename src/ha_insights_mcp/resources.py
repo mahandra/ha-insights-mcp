@@ -64,6 +64,8 @@ def render_policy(policy: Policy) -> str:
         "Anything not listed is denied. Risk 'medium' and 'high' need a human confirmation.",
         f"At most {d.max_entities} entities per action; more than {d.bulk_threshold} raise the "
         f"risk one level. At most {d.rate_limit_per_minute} executed actions per minute.",
+        f"Temperature bounds below are in {d.temperature_unit}; preview_action shows them "
+        "converted to Home Assistant's unit.",
         "",
         "## Allowed services",
     ]

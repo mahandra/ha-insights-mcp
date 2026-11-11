@@ -63,7 +63,7 @@ async def test_preview_allowed_low_risk(client) -> None:
             "already_satisfied": False,
         }
     ]
-    assert out["allowed_ranges"]["brightness_pct"] == {"min": 0, "max": 100}
+    assert out["allowed_ranges"]["brightness_pct"] == {"min": 0, "max": 100, "unit": None}
     assert out["next_step"].startswith("Allowed")
 
 
@@ -79,7 +79,7 @@ async def test_preview_denied_lists_failed_checks(client) -> None:
     failed = [c for c in out["checks"] if not c["ok"]]
     assert [c["check"] for c in failed] == ["value.temperature"]
     assert "[16, 26]" in failed[0]["detail"]
-    assert out["allowed_ranges"]["temperature"] == {"min": 16, "max": 26}
+    assert out["allowed_ranges"]["temperature"] == {"min": 16, "max": 26, "unit": "°C"}
 
 
 async def test_preview_unknown_service_does_not_touch_ha(client, api) -> None:

@@ -5,7 +5,8 @@ HA's service schemas; the output is a decision with one check per rule. No I/O, 
 
 Everything not listed in the policy file is denied. Value bounds are the intersection of
 three sources: the policy, the entity's own limits (e.g. a thermostat's min_temp) and the
-selector in HA's service schema.
+selector in HA's service schema. Policy temperature bounds have an explicit unit and are
+converted to HA's unit system, so "16..26 °C" stays safe on a °F installation.
 """
 
 import math
@@ -58,6 +59,17 @@ ATTRIBUTE_BOUNDS: dict[tuple[str, str], tuple[str, str]] = {
     ("number", "value"): ("min", "max"),
     ("input_number", "value"): ("min", "max"),
 }
+
+# Fields in HA's temperature unit (the unit system of the installation).
+TEMPERATURE_FIELDS = frozenset(
+    {
+        ("climate", "temperature"),
+        ("climate", "target_temp_low"),
+        ("climate", "target_temp_high"),
+        ("water_heater", "temperature"),
+    }
+)
+TemperatureUnit = Literal["°C", "°F"]
 
 # (domain, field) -> attribute listing the values the entity accepts.
 ATTRIBUTE_OPTIONS: dict[tuple[str, str], str] = {
@@ -112,6 +124,8 @@ class PolicyDefaults(_PolicyModel):
     # More target entities than this raises the risk by one level.
     bulk_threshold: int = Field(default=3, ge=1)
     rate_limit_per_minute: int = Field(default=10, ge=1)
+    # Unit of temperature bounds in this file; converted to HA's unit when evaluating.
+    temperature_unit: TemperatureUnit = "°C"
 
 
 class DenyList(_PolicyModel):
@@ -189,6 +203,8 @@ class Decision:
     checks: list[Check]
     # Bounds for every bounded field of the domain, intersected over all targets.
     effective_bounds: dict[str, tuple[float, float]]
+    # Unit of a bounded field when known (temperatures), e.g. {"temperature": "°F"}.
+    units: dict[str, str] = field(default_factory=dict)
 
     @property
     def failures(self) -> list[Check]:
@@ -247,8 +263,19 @@ def _fmt(value: float) -> str:
     return str(int(value)) if value.is_integer() else str(value)
 
 
-def _bounds_text(bounds: tuple[float, float]) -> str:
-    return f"[{_fmt(bounds[0])}, {_fmt(bounds[1])}]"
+def _bounds_text(bounds: tuple[float, float], unit: str | None = None) -> str:
+    text = f"[{_fmt(bounds[0])}, {_fmt(bounds[1])}]"
+    return f"{text} {unit}" if unit else text
+
+
+def convert_temperature(value: float, source: str, target: str) -> float:
+    if source == target:
+        return value
+    if (source, target) == ("°C", "°F"):
+        return round(value * 9 / 5 + 32, 1)
+    if (source, target) == ("°F", "°C"):
+        return round((value - 32) * 5 / 9, 1)
+    raise ValueError(f"unsupported temperature units: {source} -> {target}")
 
 
 def effective_bounds(
@@ -256,13 +283,19 @@ def effective_bounds(
     domain: str,
     targets: list[EntityState],
     fields: Mapping[str, Mapping[str, Any]] | None,
+    temperature_unit: str,
 ) -> dict[str, tuple[float, float]]:
     rules = policy.domains[domain]
     result = {}
     for name in rules.fields:
         sources: list[tuple[float | None, float | None]] = []
         if name in rules.bounds:
-            sources.append(rules.bounds[name])
+            low, high = rules.bounds[name]
+            if (domain, name) in TEMPERATURE_FIELDS:
+                source = policy.defaults.temperature_unit
+                low = convert_temperature(low, source, temperature_unit)
+                high = convert_temperature(high, source, temperature_unit)
+            sources.append((low, high))
         if fields and name in fields:
             sources.append(selector_bounds(fields[name]))
         if (domain, name) in ATTRIBUTE_BOUNDS:
@@ -282,6 +315,7 @@ def _check_value(
     value: Any,
     bounds: tuple[float, float] | None,
     targets: list[EntityState],
+    unit: str | None = None,
 ) -> Check:
     check = f"value.{name}"
     if bounds is not None:
@@ -289,10 +323,16 @@ def _check_value(
         if number is None:
             return Check(check, False, f"{value!r} is not a number")
         if bounds[0] > bounds[1]:
-            return Check(check, False, "the targets have no common allowed range")
+            return Check(
+                check,
+                False,
+                f"no allowed value: the policy and the device limits do not overlap "
+                f"({_bounds_text(bounds, unit)})",
+            )
+        text = _bounds_text(bounds, unit)
         if not bounds[0] <= number <= bounds[1]:
-            return Check(check, False, f"{_fmt(number)} is outside {_bounds_text(bounds)}")
-        return Check(check, True, f"{_fmt(number)} is within {_bounds_text(bounds)}")
+            return Check(check, False, f"{_fmt(number)} is outside {text}")
+        return Check(check, True, f"{_fmt(number)} is within {text}")
     if (domain, name) in ATTRIBUTE_OPTIONS:
         attr = ATTRIBUTE_OPTIONS[(domain, name)]
         for target in targets:
@@ -314,9 +354,11 @@ def evaluate(
     request: ActionRequest,
     states: Mapping[str, EntityState],
     services: Mapping[str, Any] | None = None,
+    temperature_unit: str | None = None,
 ) -> Decision:
     """Check a requested action against the policy. `services` is HA's `get_services`
     payload; without it the schema checks (service exists, required fields) are skipped.
+    `temperature_unit` is HA's unit system temperature unit (default: the policy's).
     """
     domain, _, service = request.service.partition(".")
     if not policy.allows(request.service):
@@ -397,10 +439,14 @@ def evaluate(
         else:
             checks.append(Check("fields_valid", True, "fields match the service schema"))
 
-    bounds = effective_bounds(policy, domain, targets, fields)
+    unit = temperature_unit or policy.defaults.temperature_unit
+    bounds = effective_bounds(policy, domain, targets, fields, unit)
+    units = {name: unit for name in bounds if (domain, name) in TEMPERATURE_FIELDS}
     for name, value in request.data.items():
         if name in rules.fields:
-            checks.append(_check_value(domain, name, value, bounds.get(name), targets))
+            checks.append(
+                _check_value(domain, name, value, bounds.get(name), targets, units.get(name))
+            )
 
     risk = policy.risk_of(request.service)
     if len(ids) > policy.defaults.bulk_threshold:
@@ -411,4 +457,5 @@ def evaluate(
         needs_confirmation=risk != "low",
         checks=checks,
         effective_bounds=bounds,
+        units=units,
     )
