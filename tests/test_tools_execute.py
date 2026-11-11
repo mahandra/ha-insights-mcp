@@ -261,3 +261,11 @@ async def test_action_log_tool(home, actions) -> None:
     assert out["entries"][1]["verification"] == "confirmed"
     assert [e["service"] for e in only_lock["entries"]] == ["lock.unlock"]
     assert [e["service"] for e in executed["entries"]] == ["light.turn_on"]
+
+
+async def test_confirmation_marks_no_op_targets(home, actions) -> None:
+    seen: list = []
+    callback = answering("decline", seen=seen)
+    async with session(home, actions, elicitation_callback=callback) as c:
+        await execute(c, "cover.close_cover", ["cover.garage_door"])
+    assert "state closed -> closed (already in this state)" in seen[0].message

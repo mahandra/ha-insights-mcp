@@ -188,7 +188,8 @@ def confirmation_message(assessment: Assessment, reason: str) -> str:
     request = assessment.request
     lines = [f"Home Assistant action, risk {assessment.decision.risk}: {request.service}"]
     for change in planned_changes(assessment):
-        lines.append(f"- {change.name} ({change.entity_id}): {change.expected or 'see data'}")
+        note = " (already in this state)" if change.already_satisfied else ""
+        lines.append(f"- {change.name} ({change.entity_id}): {change.expected or 'see data'}{note}")
     if request.data:
         lines.append("Data: " + ", ".join(f"{k}={v}" for k, v in sorted(request.data.items())))
     # The reason is the model's text: label it, so the human weighs it accordingly.
