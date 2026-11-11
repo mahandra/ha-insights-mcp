@@ -248,3 +248,16 @@ async def test_tool_annotations(home, actions) -> None:
     assert "confirmation" not in execute_tool.input_schema["properties"]
     assert set(execute_tool.input_schema["required"]) == {"service", "entity_ids", "reason"}
     assert tools["preview_action"].annotations.read_only_hint is True
+
+
+async def test_action_log_tool(home, actions) -> None:
+    async with session(home, actions) as c:
+        await execute(c, "light.turn_on", ["light.bed_light"])
+        await execute(c, "lock.unlock", ["lock.front_door"])  # refused: no channel
+        out = await call(c, "get_action_log")
+        only_lock = await call(c, "get_action_log", entity_id="lock.front_door")
+        executed = await call(c, "get_action_log", outcome="executed")
+    assert [e["outcome"] for e in out["entries"]] == ["no_confirmation_channel", "executed"]
+    assert out["entries"][1]["verification"] == "confirmed"
+    assert [e["service"] for e in only_lock["entries"]] == ["lock.unlock"]
+    assert [e["service"] for e in executed["entries"]] == ["light.turn_on"]

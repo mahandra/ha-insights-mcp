@@ -1,5 +1,7 @@
 """Runtime settings loaded from environment variables or a `.env` file."""
 
+from pathlib import Path
+
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,6 +18,10 @@ class Settings(BaseSettings):
     battery_low_percent: float = Field(default=20, ge=0, le=100)
     stale_hours: float = Field(default=24, gt=0)
     flapping_changes_per_hour: int = Field(default=20, ge=2)
+    # Guarded actions (off by default: the server is read-only unless enabled)
+    actions_enabled: bool = False
+    actions_policy_path: Path = Path("policy.toml")
+    audit_db_path: Path = Path("data/audit.db")
     log_level: str = "INFO"
 
     @field_validator("ha_url")

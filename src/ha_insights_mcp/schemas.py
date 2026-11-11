@@ -276,3 +276,21 @@ class ActionResult(BaseModel):
     message: str = Field(description="What happened, to relay to the user")
     failed_checks: list[ActionCheckOut]
     results: list[TargetResult]
+
+
+class ActionLogEntry(BaseModel):
+    action_id: int
+    at: datetime
+    service: str
+    entity_ids: list[str]
+    data: dict[str, Any]
+    reason: str = Field(description="The assistant's stated reason at the time")
+    risk: RiskOut | None
+    confirmation: str | None
+    outcome: OutcomeOut
+    verification: VerificationOut | None
+    detail: str | None
+
+
+class ActionLog(BaseModel):
+    entries: list[ActionLogEntry] = Field(description="Newest first")

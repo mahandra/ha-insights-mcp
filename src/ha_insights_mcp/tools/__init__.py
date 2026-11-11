@@ -1,4 +1,5 @@
-"""MCP tools, grouped by theme. All tools are read-only."""
+"""Read-only MCP tools, grouped by theme. Guarded actions (tools.actions) are registered
+separately, only when enabled."""
 
 from mcp.server.mcpserver import MCPServer
 

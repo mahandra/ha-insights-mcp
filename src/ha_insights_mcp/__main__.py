@@ -5,6 +5,7 @@ import sys
 
 from pydantic import ValidationError
 
+from ha_insights_mcp.actions.policy import PolicyError
 from ha_insights_mcp.config import Settings
 from ha_insights_mcp.server import server_from_settings
 
@@ -28,7 +29,12 @@ def main() -> None:
     # httpx logs every request at INFO; keep it quiet.
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    server_from_settings(settings).run("stdio")
+    try:
+        server = server_from_settings(settings)
+    except PolicyError as exc:
+        # Fail closed: actions were requested but we cannot tell what is allowed.
+        sys.exit(f"ha-insights-mcp: {exc}")
+    server.run("stdio")
 
 
 if __name__ == "__main__":

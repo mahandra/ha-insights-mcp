@@ -29,9 +29,12 @@ from ha_insights_mcp.context import ActionsContext, AppContext, app, ha_errors_a
 from ha_insights_mcp.ha.models import ENTITY_ID_PATTERN
 from ha_insights_mcp.schemas import (
     ActionCheckOut,
+    ActionLog,
+    ActionLogEntry,
     ActionPreview,
     ActionResult,
     Bounds,
+    OutcomeOut,
     PlannedChange,
     TargetResult,
 )
@@ -129,6 +132,7 @@ def _finite(value: float) -> float | None:
 def register(mcp: MCPServer) -> None:
     register_preview(mcp)
     register_execute(mcp)
+    register_log(mcp)
 
 
 def register_preview(mcp: MCPServer) -> None:
@@ -351,3 +355,36 @@ def register_execute(mcp: MCPServer) -> None:
         else:
             message = f"Home Assistant did not perform the action: {entry.detail}"
         return action_result(entry, assessment, message, verifications, after)
+
+
+def register_log(mcp: MCPServer) -> None:
+    @mcp.tool(title="Action log", annotations=READ_ONLY)
+    async def get_action_log(
+        ctx: Context[AppContext],
+        limit: Annotated[int, Field(ge=1, le=100, description="Max entries")] = 20,
+        entity_id: Annotated[
+            str | None, Field(pattern=ENTITY_ID_PATTERN, description="Only actions on this entity")
+        ] = None,
+        outcome: Annotated[OutcomeOut | None, Field(description="Only this outcome")] = None,
+    ) -> ActionLog:
+        """Past action attempts from the audit log, newest first: what was requested, why,
+        whether a human confirmed, and what happened. Includes refused attempts."""
+        entries = await actions_of(ctx).audit_log.recent(limit, entity_id, outcome)
+        return ActionLog(
+            entries=[
+                ActionLogEntry(
+                    action_id=e.id or 0,
+                    at=e.at,
+                    service=e.service,
+                    entity_ids=e.entity_ids,
+                    data=e.data,
+                    reason=e.reason,
+                    risk=e.risk,
+                    confirmation=e.confirmation,
+                    outcome=e.outcome,
+                    verification=e.verification,
+                    detail=e.detail,
+                )
+                for e in entries
+            ]
+        )

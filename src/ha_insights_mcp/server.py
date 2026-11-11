@@ -9,6 +9,9 @@ from datetime import datetime
 from mcp.server.mcpserver import MCPServer
 
 from ha_insights_mcp import __version__
+from ha_insights_mcp.actions.audit_log import AuditLog
+from ha_insights_mcp.actions.policy import load_policy
+from ha_insights_mcp.actions.ratelimit import RateLimiter
 from ha_insights_mcp.analytics.health import HealthThresholds
 from ha_insights_mcp.config import Settings
 from ha_insights_mcp.context import ActionsContext, AppContext
@@ -82,6 +85,24 @@ def create_server(
     return mcp
 
 
+def actions_from_settings(settings: Settings) -> ActionsContext | None:
+    """Raises PolicyError if actions are enabled but the policy file is missing/invalid."""
+    if not settings.actions_enabled:
+        return None
+    policy = load_policy(settings.actions_policy_path)
+    logger.info(
+        "Guarded actions enabled: %d domains in %s, audit log %s",
+        len(policy.domains),
+        settings.actions_policy_path,
+        settings.audit_db_path,
+    )
+    return ActionsContext(
+        policy=policy,
+        audit_log=AuditLog(settings.audit_db_path),
+        limiter=RateLimiter(policy.defaults.rate_limit_per_minute),
+    )
+
+
 def server_from_settings(settings: Settings) -> MCPServer:
     return create_server(
         client_factory=lambda: HAClient(
@@ -93,4 +114,5 @@ def server_from_settings(settings: Settings) -> MCPServer:
             stale_hours=settings.stale_hours,
             flapping_changes_per_hour=settings.flapping_changes_per_hour,
         ),
+        actions=actions_from_settings(settings),
     )
