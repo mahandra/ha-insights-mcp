@@ -24,3 +24,4 @@ dev/ha-config/*
 # Local action policy and audit log
 policy.toml
 data/
+tokens.toml

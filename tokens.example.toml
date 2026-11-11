@@ -1,0 +1,12 @@
+# Bearer tokens for the HTTP transport (MCP_TRANSPORT=http). Copy to tokens.toml.
+# Only SHA-256 hashes are stored. Create entries with:
+#   uv run ha-insights-mcp token create --name laptop --scope ha:read
+#
+# Scopes: "ha:read" (analytics, preview_action) and "ha:actions" (execute_action;
+# implies ha:read). A holder of ha:actions can also answer the human confirmation of
+# risky actions, so give it only to clients you trust.
+
+[[tokens]]
+name = "example"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+scopes = ["ha:read"]

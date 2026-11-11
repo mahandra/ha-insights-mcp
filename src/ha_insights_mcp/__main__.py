@@ -6,11 +6,17 @@ import sys
 from pydantic import ValidationError
 
 from ha_insights_mcp.actions.policy import PolicyError
+from ha_insights_mcp.cli import build_parser, token_create
 from ha_insights_mcp.config import Settings
 from ha_insights_mcp.server import server_from_settings
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    if args.command == "token":
+        print(token_create(args.name, args.scope), end="")
+        return
+
     try:
         settings = Settings()
     except ValidationError as exc:
