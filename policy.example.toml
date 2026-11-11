@@ -1,0 +1,46 @@
+# Action policy for HA Insights MCP. Copy to policy.toml and adjust.
+#
+# Everything not listed here is denied. The assistant cannot change this file.
+# Risk: "low" runs right away; "medium" and "high" need a human confirmation in the
+# MCP client (elicitation). More than `bulk_threshold` targets raise the risk one level.
+# Value bounds are intersected with the entity's own limits and HA's service schema.
+
+[defaults]
+max_entities = 10
+bulk_threshold = 3
+rate_limit_per_minute = 10
+
+[domains.light]
+risk = "low"
+services = ["turn_on", "turn_off", "toggle"]
+fields = ["brightness_pct", "color_temp_kelvin", "transition"]  # no flash / effect
+
+[domains.switch]
+risk = "low"
+services = ["turn_on", "turn_off"]
+
+[domains.fan]
+risk = "low"
+services = ["turn_on", "turn_off", "set_percentage"]
+fields = ["percentage"]
+
+[domains.climate]
+risk = "medium"
+services = ["set_temperature", "set_hvac_mode"]
+fields = ["temperature", "hvac_mode"]
+bounds = { temperature = [16, 26] }
+
+[domains.cover]
+risk = "medium"
+services = ["open_cover", "close_cover", "set_cover_position"]
+fields = ["position"]
+
+[domains.lock]
+risk = "low"
+services = ["lock", "unlock"]
+
+[domains.lock.service_risk]
+unlock = "high"  # locking is safe; unlocking always asks a human
+
+[deny]
+entities = []  # e.g. ["switch.server_power"]

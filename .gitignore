@@ -20,3 +20,7 @@ dev/ha-config/*
 .idea/
 .vscode/
 .DS_Store
+
+# Local action policy and audit log
+policy.toml
+data/
