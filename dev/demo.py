@@ -10,6 +10,7 @@ you answer it. Used for the README GIF (docs/demo.tape).
 import asyncio
 import os
 import sys
+import tempfile
 from typing import Any
 
 from mcp import Client, types
@@ -53,13 +54,19 @@ async def run(client: Client, tool: str, **args: Any) -> dict[str, Any]:
 
 
 async def main() -> None:
-    env = {
-        **os.environ,
-        "ACTIONS_ENABLED": "true",
-        "AUDIT_DB_PATH": "data/demo-audit.db",
-        "LOG_LEVEL": "WARNING",
-    }
-    server = StdioServerParameters(command="uv", args=["run", "ha-insights-mcp"], env=env)
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {
+            **os.environ,
+            "ACTIONS_ENABLED": "true",
+            # A fresh audit log per run, so the demo shows only its own actions.
+            "AUDIT_DB_PATH": os.path.join(tmp, "audit.db"),
+            "LOG_LEVEL": "WARNING",
+        }
+        server = StdioServerParameters(command="uv", args=["run", "ha-insights-mcp"], env=env)
+        await demo(server)
+
+
+async def demo(server: StdioServerParameters) -> None:
     async with Client(server, elicitation_callback=ask_human) as client:
         step("What is broken in my home?")
         health = await run(client, "check_device_health", min_severity="error")
@@ -89,7 +96,7 @@ async def main() -> None:
             "execute_action",
             service="lock.unlock",
             entity_ids=["lock.front_door"],
-            reason="Guest is arriving, the user asked to let them in",
+            reason="A guest is arriving",
         )
         color = GREEN if result["outcome"] == "executed" else YELLOW
         print(f"  {color}{result['outcome']}{RESET}: {result['message']}")

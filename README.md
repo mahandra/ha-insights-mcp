@@ -7,9 +7,12 @@ diagnostics and guarded actions** for [Home Assistant](https://www.home-assistan
 > audit and opt-in guarded actions, over stdio or authenticated Streamable HTTP (Docker).
 > See [Roadmap](#roadmap).
 
-The demo (`dev/demo.py`, a real MCP client) runs diagnostics, gets a thermostat value
-refused (°C policy on a °F home) and unlocks a door after a human confirmation. Render the
-GIF with [VHS](https://github.com/charmbracelet/vhs): `vhs docs/demo.tape` → `docs/demo.gif`.
+![Demo: diagnostics, a refused thermostat value, a door unlock confirmed by the human](docs/demo.gif)
+
+`dev/demo.py` is a real MCP client over stdio that plays the client app: it runs
+diagnostics, gets a thermostat value refused (°C policy on a °F home) and unlocks a door
+after the human answers the server's confirmation prompt. Regenerate the GIF with
+[VHS](https://github.com/charmbracelet/vhs): `vhs docs/demo.tape`.
 
 ## Positioning: why another Home Assistant MCP server?
 
