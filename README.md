@@ -315,6 +315,11 @@ claude mcp list              # should show ha-insights: connected
 reference the resource with `@ha-insights:ha://home/summary`, or run a prompt:
 `/mcp__ha-insights__home_health_report`.
 
+![Claude Code answering "show me status of lights in living room" via ha-insights](docs/claude-code-lights.png)
+
+The agent finds that the living room's lights are switch entities, reports their state and
+points out a low door sensor battery it noticed along the way.
+
 ### Claude Desktop
 
 `~/.config/Claude/claude_desktop_config.json` (Linux) or
